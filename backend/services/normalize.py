@@ -21,4 +21,7 @@ def normalize_quote_input(raw_text: str) -> "QuoteDraft":
     in a consistent shape for downstream processing.
     """
 
-    raise NotImplementedError
+    # Placeholder implementation keeps the demo backend safe while avoiding crashes.
+    from models import QuoteDraft
+
+    return QuoteDraft(id=0, deal_id=0, supplier_id=0, tentative_amount=None, notes=None)

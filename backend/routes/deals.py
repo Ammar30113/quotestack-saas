@@ -1,6 +1,10 @@
 """Routing module for deal-related endpoints."""
 
+from itertools import count
+
 from fastapi import APIRouter, HTTPException
+
+from backend.models.schemas import DealCreate, DealUpdate
 
 router = APIRouter(prefix="/deals", tags=["deals"])
 
@@ -9,11 +13,7 @@ _deals = {
     1: {"id": 1, "name": "Sample Deal", "value": 1000},
     2: {"id": 2, "name": "Second Deal", "value": 2500},
 }
-
-
-def _next_id() -> int:
-    """Generate the next deal identifier based on the current store."""
-    return max(_deals.keys(), default=0) + 1
+_deal_id_counter = count(start=max(_deals.keys(), default=0) + 1)
 
 
 @router.get("/")
@@ -32,20 +32,24 @@ def retrieve_deal(deal_id: int):
 
 
 @router.post("/")
-def create_deal(payload: dict):
+def create_deal(payload: DealCreate):
     """Create a new deal from the provided payload."""
-    deal_id = _next_id()
-    deal = {"id": deal_id, **payload}
+    deal_id = next(_deal_id_counter)
+    data = payload.model_dump(exclude={"id"})
+    deal = {"id": deal_id, **data}
     _deals[deal_id] = deal
     return {"deal": deal, "message": "Deal created"}
 
 
 @router.put("/{deal_id}")
-def update_deal(deal_id: int, payload: dict):
+def update_deal(deal_id: int, payload: DealUpdate):
     """Update an existing deal with new data."""
     if deal_id not in _deals:
         raise HTTPException(status_code=404, detail="Deal not found")
-    _deals[deal_id].update(payload)
+
+    update_data = payload.model_dump(exclude_unset=True, exclude={"id"})
+    _deals[deal_id].update(update_data)
+    _deals[deal_id]["id"] = deal_id
     return {"deal": _deals[deal_id], "message": "Deal updated"}
 
 
