@@ -22,7 +22,7 @@ module.exports = {
         }
       },
       fontFamily: {
-        sans: ["var(--font-manrope)", "ui-sans-serif", "system-ui"]
+        sans: ["ui-sans-serif", "system-ui", "sans-serif"]
       }
     }
   },

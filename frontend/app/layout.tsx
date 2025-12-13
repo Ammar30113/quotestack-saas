@@ -1,14 +1,7 @@
 import "./globals.css";
 
-import { Manrope } from "next/font/google";
 import type { Metadata } from "next";
 import Link from "next/link";
-
-const manrope = Manrope({
-  subsets: ["latin"],
-  variable: "--font-manrope",
-  display: "swap"
-});
 
 export const metadata: Metadata = {
   title: "QuoteStack",
@@ -17,8 +10,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={manrope.variable}>
-      <body className="min-h-screen bg-[var(--bg)] text-slate-50">
+    <html lang="en">
+      <body className="min-h-screen bg-[var(--bg)] text-slate-50 font-sans">
         <header className="border-b border-slate-800 bg-[#0b1220]/70 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
             <div className="flex items-center gap-3">
