@@ -1,0 +1,16 @@
+# Next.js build output
+.next
+out
+
+# Dependencies
+node_modules
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor settings
+.DS_Store
+.vscode
