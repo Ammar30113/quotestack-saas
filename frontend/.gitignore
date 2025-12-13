@@ -1,6 +1,7 @@
 # Next.js build output
 .next
 out
+.vercel
 
 # Dependencies
 node_modules
