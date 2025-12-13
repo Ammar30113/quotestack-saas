@@ -3,7 +3,7 @@
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DealCreate(BaseModel):
@@ -31,6 +31,10 @@ class QuoteCreate(BaseModel):
 
     deal_id: int
     amount: Decimal
+    supplier: Optional[str] = None
+    currency: Optional[str] = None
+    lead_time_days: Optional[int] = Field(None, alias="lead_time")
+    moq: Optional[int] = None
 
 
 class QuoteUpdate(BaseModel):
@@ -40,3 +44,7 @@ class QuoteUpdate(BaseModel):
 
     deal_id: Optional[int] = None
     amount: Optional[Decimal] = None
+    supplier: Optional[str] = None
+    currency: Optional[str] = None
+    lead_time_days: Optional[int] = Field(None, alias="lead_time")
+    moq: Optional[int] = None
