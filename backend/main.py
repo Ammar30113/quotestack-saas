@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI
 
 from backend.routes import deals, quotes
@@ -12,3 +14,18 @@ async def health_check():
 
 app.include_router(deals.router)
 app.include_router(quotes.router)
+
+
+def _get_port() -> int:
+    raw_port = os.environ.get("PORT", "8000")
+    try:
+        return int(raw_port)
+    except ValueError:
+        print(f"Invalid PORT value '{raw_port}', defaulting to 8000")
+        return 8000
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=_get_port())

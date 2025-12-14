@@ -13,4 +13,5 @@ COPY backend /app/backend
 ENV PYTHONUNBUFFERED=1
 
 # Railway injects $PORT; default to 8000 for local use. Read inside Python to avoid shell interpolation issues.
-CMD ["python", "-c", "import os, uvicorn; uvicorn.run('backend.main:app', host='0.0.0.0', port=int(os.environ.get('PORT', '8000')))"]
+EXPOSE 8000
+CMD ["python", "-m", "backend.main"]
