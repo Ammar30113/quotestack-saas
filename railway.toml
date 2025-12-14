@@ -1,8 +1,0 @@
-[build]
-builder = "dockerfile"
-dockerfilePath = "Dockerfile"
-context = "."
-
-[deploy]
-# Container exposes PORT; Railway provides it at runtime.
-restartPolicyType = "onFailure"
