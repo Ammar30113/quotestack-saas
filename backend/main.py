@@ -7,6 +7,11 @@ from backend.routes import deals, quotes
 app = FastAPI()
 
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "quotestack-backend"}
+
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
