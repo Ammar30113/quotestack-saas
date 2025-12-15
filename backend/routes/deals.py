@@ -13,12 +13,19 @@ def _map_deal(row: dict) -> dict:
         "id": row.get("id"),
         "name": row.get("name", ""),
         "value": row.get("value"),
+        "created_at": row.get("created_at"),
     }
 
 
 def _require_deal(deal_id: int) -> dict:
     supabase = get_supabase_client()
-    response = supabase.table("deals").select("id,name,value").eq("id", deal_id).limit(1).execute()
+    response = (
+        supabase.table("deals")
+        .select("id,name,value,created_at")
+        .eq("id", deal_id)
+        .limit(1)
+        .execute()
+    )
     if getattr(response, "error", None):
         raise HTTPException(status_code=500, detail=str(response.error))
     data = response.data or []
@@ -31,11 +38,11 @@ def _require_deal(deal_id: int) -> dict:
 def list_deals():
     """Return a list of all deals."""
     supabase = get_supabase_client()
-    response = supabase.table("deals").select("id,name,value").execute()
+    response = supabase.table("deals").select("id,name,value,created_at").execute()
     if getattr(response, "error", None):
         raise HTTPException(status_code=500, detail=str(response.error))
     deals = [_map_deal(row) for row in response.data or []]
-    return {"deals": deals}
+    return deals
 
 
 @router.get("/{deal_id}")
@@ -52,7 +59,7 @@ def create_deal(payload: DealCreate):
     insert_data = payload.model_dump(exclude={"id"})
     if insert_data.get("value") is not None:
         insert_data["value"] = float(insert_data["value"])
-    response = supabase.table("deals").insert(insert_data).select("id,name,value").execute()
+    response = supabase.table("deals").insert(insert_data).select("id,name,value,created_at").execute()
     if getattr(response, "error", None):
         raise HTTPException(status_code=500, detail=str(response.error))
     created = response.data[0] if response.data else None
@@ -74,7 +81,7 @@ def update_deal(deal_id: int, payload: DealUpdate):
         supabase.table("deals")
         .update(update_data)
         .eq("id", deal_id)
-        .select("id,name,value")
+        .select("id,name,value,created_at")
         .execute()
     )
     if getattr(response, "error", None):
