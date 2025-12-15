@@ -3,7 +3,7 @@
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, constr
 
 
 class DealCreate(BaseModel):
@@ -15,13 +15,24 @@ class DealCreate(BaseModel):
     value: Optional[Decimal] = None
 
 
+class DealCreateRequest(BaseModel):
+    """Schema for creating a deal with basic validation."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    company_name: constr(min_length=1)
+    currency: constr(pattern=r"^[A-Z]{3}$", min_length=3, max_length=3)
+    description: Optional[str] = None
+
+
 class DealUpdate(BaseModel):
     """Schema for updating a deal."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    name: Optional[str] = None
-    value: Optional[Decimal] = None
+    company_name: Optional[constr(min_length=1)] = None
+    currency: Optional[constr(pattern=r"^[A-Z]{3}$", min_length=3, max_length=3)] = None
+    description: Optional[str] = None
 
 
 class QuoteCreate(BaseModel):
