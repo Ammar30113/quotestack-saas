@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 import { createQuote, getDeal, getQuotesForDeal } from "@/lib/api";
+import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import type { QuoteRow } from "@/lib/mockData";
 
 type Params = { id: string };
@@ -18,55 +19,102 @@ const blankRow: QuoteRow = {
 
 export default function DealDetailPage() {
   const params = useParams<Params>();
+  const router = useRouter();
+  const supabase = getSupabaseBrowserClient();
   const dealId = Number(params?.id);
+  const [token, setToken] = useState<string | null>(null);
   const [rows, setRows] = useState<QuoteRow[]>([]);
   const [dealName, setDealName] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingRowIndex, setSavingRowIndex] = useState<number | null>(null);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [deal, quotes] = await Promise.all([getDeal(dealId), getQuotesForDeal(dealId)]);
-      setDealName(deal.name);
-      const mapped = quotes.map<QuoteRow>((quote) => ({
-        id: quote.id,
-        supplier: `Supplier ${quote.id}`,
-        price: quote.amount,
-        currency: quote.currency || "USD",
-        leadTimeDays: quote.lead_time || 0,
-        moq: quote.moq || 0
-      }));
-      setRows([...mapped, blankRow]);
-      setError(null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to load deal";
-      setError(message);
-    } finally {
+  useEffect(() => {
+    let mounted = true;
+
+    const ensureSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      const session = data.session;
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+      if (mounted) {
+        setToken(session.access_token);
+        await fetchData(session.access_token, mounted);
+      }
+    };
+
+    if (Number.isFinite(dealId)) {
+      ensureSession();
+    } else {
       setLoading(false);
     }
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+      setToken(session.access_token);
+      if (Number.isFinite(dealId)) {
+        fetchData(session.access_token);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      authListener?.subscription.unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealId]);
 
-  useEffect(() => {
-    if (!Number.isFinite(dealId)) return;
-    fetchData();
-  }, [dealId, fetchData]);
+  const fetchData = useCallback(
+    async (accessToken: string, mounted = true) => {
+      setLoading(true);
+      try {
+        const [deal, quotes] = await Promise.all([getDeal(dealId, accessToken), getQuotesForDeal(dealId, accessToken)]);
+        const mapped = quotes.map<QuoteRow>((quote) => ({
+          id: quote.id,
+          supplier: quote.supplier || `Supplier ${quote.id}`,
+          price: quote.amount,
+          currency: quote.currency || "USD",
+          leadTimeDays: quote.lead_time_days || 0,
+          moq: quote.moq || 0
+        }));
+        if (mounted) {
+          setDealName(deal.company_name);
+          setRows([...mapped, blankRow]);
+          setError(null);
+        }
+      } catch (err) {
+        if (mounted) {
+          const message = err instanceof Error ? err.message : "Failed to load deal";
+          setError(message);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    },
+    [dealId]
+  );
 
   const submitRow = async (index: number) => {
     const row = rows[index];
-    if (row.id || !row.supplier || !row.price || savingRowIndex !== null) return;
+    if (!token || row.id || !row.supplier || !row.price || savingRowIndex !== null) return;
 
     setSavingRowIndex(index);
     try {
-      await createQuote(dealId, {
+      await createQuote(token, dealId, {
         amount: row.price,
         currency: row.currency,
         supplier: row.supplier,
         leadTimeDays: row.leadTimeDays,
         moq: row.moq
       });
-      await fetchData();
+      await fetchData(token);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to save quote";
       setError(message);

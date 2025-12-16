@@ -1,18 +1,9 @@
-"""Pydantic request schemas for the in-memory backend."""
+"""Pydantic request schemas for the FastAPI backend."""
 
 from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, constr
-
-
-class DealCreate(BaseModel):
-    """Schema for creating a deal."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    name: str
-    value: Optional[Decimal] = None
 
 
 class DealCreateRequest(BaseModel):
@@ -38,7 +29,7 @@ class DealUpdate(BaseModel):
 class QuoteCreate(BaseModel):
     """Schema for creating a quote."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     deal_id: int
     amount: Decimal
@@ -51,7 +42,7 @@ class QuoteCreate(BaseModel):
 class QuoteUpdate(BaseModel):
     """Schema for updating a quote."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     deal_id: Optional[int] = None
     amount: Optional[Decimal] = None

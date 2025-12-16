@@ -1,27 +1,34 @@
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 
-type ApiDeal = {
+export type ApiDeal = {
   id: number;
-  name: string;
-  value?: number;
+  company_name: string;
+  currency: string;
+  description?: string | null;
+  created_at?: string | null;
 };
 
-type ApiQuote = {
+export type ApiQuote = {
   id: number;
   deal_id: number;
   amount: number;
-  currency?: string;
-  supplier?: string;
-  lead_time?: number;
-  moq?: number;
+  currency?: string | null;
+  supplier?: string | null;
+  lead_time_days?: number | null;
+  moq?: number | null;
+  created_at?: string | null;
 };
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+type RequestOptions = RequestInit & { token?: string };
+
+async function request<T>(path: string, options?: RequestOptions): Promise<T> {
+  const { token, ...rest } = options || {};
   const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
+    ...rest,
     headers: {
       "Content-Type": "application/json",
-      ...(options?.headers || {})
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(rest.headers || {})
     },
     cache: "no-store"
   });
@@ -42,19 +49,29 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function getDeals(): Promise<ApiDeal[]> {
-  const data = await request<{ deals: ApiDeal[] }>("/deals");
-  return data.deals || [];
+export async function getDeals(token: string): Promise<ApiDeal[]> {
+  return request<ApiDeal[]>("/deals", { token });
 }
 
-export async function getDeal(id: number): Promise<ApiDeal> {
-  const data = await request<{ deal: ApiDeal }>(`/deals/${id}`);
+export async function createDeal(
+  token: string,
+  payload: { company_name: string; currency: string; description?: string | null }
+): Promise<ApiDeal> {
+  return request<ApiDeal>("/deals", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    token
+  });
+}
+
+export async function getDeal(id: number, token: string): Promise<ApiDeal> {
+  const data = await request<{ deal: ApiDeal }>(`/deals/${id}`, { token });
   return data.deal;
 }
 
-export async function getQuotesForDeal(dealId: number): Promise<ApiQuote[]> {
-  const data = await request<{ quotes: ApiQuote[] }>("/quotes");
-  return (data.quotes || []).filter((quote) => quote.deal_id === dealId);
+export async function getQuotesForDeal(dealId: number, token: string): Promise<ApiQuote[]> {
+  const data = await request<{ quotes: ApiQuote[] }>(`/quotes?deal_id=${dealId}`, { token });
+  return data.quotes || [];
 }
 
 type CreateQuotePayload = {
@@ -65,7 +82,7 @@ type CreateQuotePayload = {
   moq?: number;
 };
 
-export async function createQuote(dealId: number, payload: CreateQuotePayload) {
+export async function createQuote(token: string, dealId: number, payload: CreateQuotePayload) {
   const body = {
     deal_id: dealId,
     amount: payload.amount,
@@ -77,7 +94,8 @@ export async function createQuote(dealId: number, payload: CreateQuotePayload) {
 
   const data = await request<{ quote: ApiQuote; message?: string }>("/quotes", {
     method: "POST",
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    token
   });
 
   return data.quote;

@@ -24,10 +24,18 @@ class Settings:
         debug: Whether to run the application in debug mode. Controlled by the
             ``DEBUG`` environment variable, accepting common truthy values such
             as ``1``, ``true``, ``yes``, or ``on``. Defaults to ``False``.
+        supabase_url: Base URL for Supabase project, required.
+        supabase_anon_key: Public anon key for Supabase, required for user-bound
+            requests that respect Row Level Security.
+        supabase_jwt_secret: JWT secret used to validate Supabase-issued access
+            tokens on the backend.
     """
 
     app_name: str = "QuoteStack"
     debug: bool = False
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_jwt_secret: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -36,6 +44,9 @@ class Settings:
         return cls(
             app_name=_get_env("APP_NAME", default=cls.app_name),
             debug=_get_bool("DEBUG", default=cls.debug),
+            supabase_url=_get_env("SUPABASE_URL", default="").rstrip("/"),
+            supabase_anon_key=_get_env("SUPABASE_ANON_KEY", default=""),
+            supabase_jwt_secret=_get_env("SUPABASE_JWT_SECRET", default=""),
         )
 
 
@@ -43,6 +54,15 @@ def _get_env(key: str, default: Optional[str] = None) -> str:
     """Read a string environment variable with a fallback default."""
 
     return os.environ.get(key, default or "")
+
+
+def require_env(key: str) -> str:
+    """Read an environment variable and raise if missing."""
+
+    value = os.environ.get(key)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {key}")
+    return value
 
 
 def _get_bool(key: str, default: bool = False) -> bool:
@@ -66,4 +86,4 @@ def get_settings() -> Settings:
     return Settings.from_env()
 
 
-__all__ = ["Settings", "get_settings"]
+__all__ = ["Settings", "get_settings", "require_env"]

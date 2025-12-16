@@ -1,9 +1,10 @@
 """Routing module for quote-related endpoints backed by Supabase."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from backend.core.auth import UserContext, get_current_user
 from backend.models.schemas import QuoteCreate, QuoteUpdate
-from backend.services.supabase_client import get_supabase_client
+from backend.services.supabase_client import get_supabase_client_for_user
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 
@@ -17,39 +18,40 @@ def _map_quote(row: dict) -> dict:
         "supplier": row.get("supplier"),
         "lead_time_days": row.get("lead_time_days"),
         "moq": row.get("moq"),
+        "created_at": row.get("created_at"),
     }
 
 
-def _ensure_deal_exists(deal_id: int) -> None:
-    supabase = get_supabase_client()
-    response = supabase.table("deals").select("id").eq("id", deal_id).limit(1).execute()
-    if getattr(response, "error", None):
-        raise HTTPException(status_code=500, detail=str(response.error))
-    data = response.data or []
-    if not data:
+def _get_client(user: UserContext):
+    return get_supabase_client_for_user(user.token)
+
+
+def _ensure_deal_exists(deal_id: int, user: UserContext) -> None:
+    supabase = _get_client(user)
+    rows = supabase.select(
+        "deals",
+        select="id",
+        filters={"id": f"eq.{deal_id}", "user_id": f"eq.{user.user_id}"},
+    )
+    if not rows:
         raise HTTPException(status_code=404, detail="Deal not found")
 
 
-def _require_quote(quote_id: int) -> dict:
-    supabase = get_supabase_client()
-    response = (
-        supabase.table("quotes")
-        .select("id,deal_id,price,currency,supplier,lead_time_days,moq")
-        .eq("id", quote_id)
-        .limit(1)
-        .execute()
+def _require_quote(quote_id: int, user: UserContext) -> dict:
+    supabase = _get_client(user)
+    rows = supabase.select(
+        "quotes",
+        select="id,deal_id,price,currency,supplier,lead_time_days,moq,created_at,user_id",
+        filters={"id": f"eq.{quote_id}", "user_id": f"eq.{user.user_id}"},
     )
-    if getattr(response, "error", None):
-        raise HTTPException(status_code=500, detail=str(response.error))
-    data = response.data or []
-    if not data:
+    if not rows:
         raise HTTPException(status_code=404, detail="Quote not found")
-    return data[0]
+    return rows[0]
 
 
-def _quote_payload_to_db(payload: QuoteCreate | QuoteUpdate) -> dict:
+def _quote_payload_to_db(payload: QuoteCreate | QuoteUpdate, user: UserContext) -> dict:
     data = payload.model_dump(exclude_unset=True, by_alias=True)
-    db_data: dict = {}
+    db_data: dict = {"user_id": user.user_id}
     if "deal_id" in data:
         db_data["deal_id"] = data["deal_id"]
     if "amount" in data:
@@ -67,77 +69,73 @@ def _quote_payload_to_db(payload: QuoteCreate | QuoteUpdate) -> dict:
 
 
 @router.get("/")
-def list_quotes():
-    """Return a list of all quotes."""
-    supabase = get_supabase_client()
-    response = supabase.table("quotes").select("id,deal_id,price,currency,supplier,lead_time_days,moq").execute()
-    if getattr(response, "error", None):
-        raise HTTPException(status_code=500, detail=str(response.error))
-    quotes = [_map_quote(row) for row in response.data or []]
+def list_quotes(
+    deal_id: int | None = Query(default=None),
+    user: UserContext = Depends(get_current_user),
+):
+    """Return a list of all quotes for the authenticated user."""
+    supabase = _get_client(user)
+    filters = {"user_id": f"eq.{user.user_id}"}
+    if deal_id is not None:
+        filters["deal_id"] = f"eq.{deal_id}"
+    rows = supabase.select(
+        "quotes",
+        select="id,deal_id,price,currency,supplier,lead_time_days,moq,created_at",
+        filters=filters,
+    )
+    quotes = [_map_quote(row) for row in rows]
     return {"quotes": quotes}
 
 
 @router.get("/{quote_id}")
-def retrieve_quote(quote_id: int):
+def retrieve_quote(quote_id: int, user: UserContext = Depends(get_current_user)):
     """Retrieve a single quote by its identifier."""
-    quote = _require_quote(quote_id)
+    quote = _require_quote(quote_id, user)
     return {"quote": _map_quote(quote)}
 
 
-@router.post("/")
-def create_quote(payload: QuoteCreate):
+@router.post("/", status_code=201)
+def create_quote(payload: QuoteCreate, user: UserContext = Depends(get_current_user)):
     """Create a new quote from the provided payload."""
-    _ensure_deal_exists(payload.deal_id)
-    supabase = get_supabase_client()
-    insert_data = _quote_payload_to_db(payload)
-    response = (
-        supabase.table("quotes")
-        .insert(insert_data)
-        .select("id,deal_id,price,currency,supplier,lead_time_days,moq")
-        .execute()
+    _ensure_deal_exists(payload.deal_id, user)
+    supabase = _get_client(user)
+    insert_data = _quote_payload_to_db(payload, user)
+    rows = supabase.insert(
+        "quotes",
+        insert_data,
     )
-    if getattr(response, "error", None):
-        raise HTTPException(status_code=500, detail=str(response.error))
-    created = response.data[0] if response.data else None
-    if not created:
+    if not rows:
         raise HTTPException(status_code=500, detail="Failed to create quote")
-    return {"quote": _map_quote(created), "message": "Quote created"}
+    return {"quote": _map_quote(rows[0]), "message": "Quote created"}
 
 
 @router.put("/{quote_id}")
-def update_quote(quote_id: int, payload: QuoteUpdate):
+def update_quote(quote_id: int, payload: QuoteUpdate, user: UserContext = Depends(get_current_user)):
     """Update an existing quote with new data."""
-    existing = _require_quote(quote_id)
+    existing = _require_quote(quote_id, user)
 
-    update_data = _quote_payload_to_db(payload)
+    update_data = _quote_payload_to_db(payload, user)
     if not update_data:
         return {"quote": _map_quote(existing), "message": "Quote updated"}
 
     if "deal_id" in update_data:
-        _ensure_deal_exists(update_data["deal_id"])
+        _ensure_deal_exists(update_data["deal_id"], user)
 
-    supabase = get_supabase_client()
-    response = (
-        supabase.table("quotes")
-        .update(update_data)
-        .eq("id", quote_id)
-        .select("id,deal_id,price,currency,supplier,lead_time_days,moq")
-        .execute()
+    supabase = _get_client(user)
+    rows = supabase.update(
+        "quotes",
+        update_data,
+        filters={"id": f"eq.{quote_id}", "user_id": f"eq.{user.user_id}"},
     )
-    if getattr(response, "error", None):
-        raise HTTPException(status_code=500, detail=str(response.error))
-    updated = response.data[0] if response.data else None
-    if not updated:
+    if not rows:
         raise HTTPException(status_code=404, detail="Quote not found")
-    return {"quote": _map_quote(updated), "message": "Quote updated"}
+    return {"quote": _map_quote(rows[0]), "message": "Quote updated"}
 
 
 @router.delete("/{quote_id}")
-def delete_quote(quote_id: int):
+def delete_quote(quote_id: int, user: UserContext = Depends(get_current_user)):
     """Delete a quote by its identifier."""
-    _require_quote(quote_id)
-    supabase = get_supabase_client()
-    response = supabase.table("quotes").delete().eq("id", quote_id).execute()
-    if getattr(response, "error", None):
-        raise HTTPException(status_code=500, detail=str(response.error))
+    _require_quote(quote_id, user)
+    supabase = _get_client(user)
+    supabase.delete("quotes", filters={"id": f"eq.{quote_id}", "user_id": f"eq.{user.user_id}"})
     return {"message": "Quote deleted"}
