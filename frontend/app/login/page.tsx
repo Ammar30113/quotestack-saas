@@ -2,12 +2,13 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
 export default function LoginPage() {
-  const supabase = getSupabaseBrowserClient();
   const router = useRouter();
+  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -15,7 +16,13 @@ export default function LoginPage() {
 
   useEffect(() => {
     const checkSession = async () => {
-      const { data } = await supabase.auth.getSession();
+      const client = getSupabaseBrowserClient();
+      if (!client) {
+        setError("Supabase client not configured");
+        return;
+      }
+      setSupabase(client);
+      const { data } = await client.auth.getSession();
       if (data.session) {
         router.replace("/deals");
       }
@@ -26,6 +33,10 @@ export default function LoginPage() {
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
+    if (!supabase) {
+      setError("Supabase client not configured");
+      return;
+    }
     setLoading(true);
     setError(null);
     const { error: signInError } = await supabase.auth.signInWithPassword({

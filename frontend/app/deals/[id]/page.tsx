@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createQuote, getDeal, getQuotesForDeal } from "@/lib/api";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
@@ -20,7 +21,7 @@ const blankRow: QuoteRow = {
 export default function DealDetailPage() {
   const params = useParams<Params>();
   const router = useRouter();
-  const supabase = getSupabaseBrowserClient();
+  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const dealId = Number(params?.id);
   const [token, setToken] = useState<string | null>(null);
   const [rows, setRows] = useState<QuoteRow[]>([]);
@@ -33,7 +34,14 @@ export default function DealDetailPage() {
     let mounted = true;
 
     const ensureSession = async () => {
-      const { data } = await supabase.auth.getSession();
+      const client = getSupabaseBrowserClient();
+      if (!client) {
+        setError("Supabase client not configured");
+        setLoading(false);
+        return;
+      }
+      setSupabase(client);
+      const { data } = await client.auth.getSession();
       const session = data.session;
       if (!session) {
         router.replace("/login");
@@ -51,20 +59,25 @@ export default function DealDetailPage() {
       setLoading(false);
     }
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
-      setToken(session.access_token);
-      if (Number.isFinite(dealId)) {
-        fetchData(session.access_token);
-      }
-    });
+    let unsubscribe: (() => void) | undefined;
+    const client = getSupabaseBrowserClient();
+    if (client) {
+      const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
+        if (!session) {
+          router.replace("/login");
+          return;
+        }
+        setToken(session.access_token);
+        if (Number.isFinite(dealId)) {
+          fetchData(session.access_token);
+        }
+      });
+      unsubscribe = () => authListener?.subscription.unsubscribe();
+    }
 
     return () => {
       mounted = false;
-      authListener?.subscription.unsubscribe();
+      unsubscribe?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealId]);

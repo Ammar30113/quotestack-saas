@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ApiDeal } from "@/lib/api";
 import { createDeal, getDeals } from "@/lib/api";
@@ -17,7 +18,7 @@ type FormState = {
 
 export default function DealsPage() {
   const router = useRouter();
-  const supabase = getSupabaseBrowserClient();
+  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [rows, setRows] = useState<ApiDeal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,7 +30,14 @@ export default function DealsPage() {
     let mounted = true;
 
     const ensureSession = async () => {
-      const { data } = await supabase.auth.getSession();
+      const client = getSupabaseBrowserClient();
+      if (!client) {
+        setError("Supabase client not configured");
+        setLoading(false);
+        return;
+      }
+      setSupabase(client);
+      const { data } = await client.auth.getSession();
       const session = data.session;
       if (!session) {
         router.replace("/login");
@@ -43,18 +51,23 @@ export default function DealsPage() {
 
     ensureSession();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
-      setToken(session.access_token);
-      loadDeals(session.access_token);
-    });
+    let unsubscribe: (() => void) | undefined;
+    const client = getSupabaseBrowserClient();
+    if (client) {
+      const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
+        if (!session) {
+          router.replace("/login");
+          return;
+        }
+        setToken(session.access_token);
+        loadDeals(session.access_token);
+      });
+      unsubscribe = () => authListener?.subscription.unsubscribe();
+    }
 
     return () => {
       mounted = false;
-      authListener?.subscription.unsubscribe();
+      unsubscribe?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
