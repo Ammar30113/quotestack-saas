@@ -67,7 +67,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 @app.get("/")
-async def root(_: UserContext = get_current_user()):
+async def root(_: UserContext = Depends(get_current_user)):
     return {"status": "ok", "service": "quotestack-backend"}
 
 
