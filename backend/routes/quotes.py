@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.core.auth import UserContext, get_current_user
-from backend.models.schemas import QuoteCreate, QuoteUpdate
+from backend.models.schemas import PaginationParams, QuoteCreate, QuoteUpdate
 from backend.services.supabase_client import get_supabase_client_for_user
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
@@ -68,12 +68,18 @@ def _quote_payload_to_db(payload: QuoteCreate | QuoteUpdate, user: UserContext) 
     return db_data
 
 
+def _get_pagination_params(limit: int = Query(default=20, ge=1), offset: int = Query(default=0, ge=0)) -> PaginationParams:
+    # Keep pagination validation consistent across endpoints.
+    return PaginationParams(limit=limit, offset=offset)
+
+
 @router.get("/")
 def list_quotes(
     deal_id: int | None = Query(default=None),
+    pagination: PaginationParams = Depends(_get_pagination_params),
     user: UserContext = Depends(get_current_user),
 ):
-    """Return a list of all quotes for the authenticated user."""
+    """Return a paginated list of quotes for the authenticated user."""
     supabase = _get_client(user)
     filters = {"user_id": f"eq.{user.user_id}"}
     if deal_id is not None:
@@ -82,9 +88,11 @@ def list_quotes(
         "quotes",
         select="id,deal_id,price,currency,supplier,lead_time_days,moq,created_at",
         filters=filters,
+        limit=pagination.limit,
+        offset=pagination.offset,
     )
     quotes = [_map_quote(row) for row in rows]
-    return {"quotes": quotes}
+    return {"quotes": quotes, "limit": pagination.limit, "offset": pagination.offset}
 
 
 @router.get("/{quote_id}")

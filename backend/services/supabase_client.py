@@ -82,10 +82,21 @@ class SupabaseRestClient:
 
         return data or []
 
-    def select(self, table: str, select: str, filters: Optional[Mapping[str, str]] = None):
+    def select(
+        self,
+        table: str,
+        select: str,
+        filters: Optional[Mapping[str, str]] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ):
         params = {"select": select}
         if filters:
             params.update(filters)
+        if limit is not None:
+            params["limit"] = str(limit)
+        if offset is not None:
+            params["offset"] = str(offset)
         return self._request("GET", table, params=params)
 
     def insert(self, table: str, payload: Any):

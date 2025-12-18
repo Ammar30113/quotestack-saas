@@ -50,3 +50,12 @@ class QuoteUpdate(BaseModel):
     currency: Optional[str] = None
     lead_time_days: Optional[int] = Field(None, alias="lead_time")
     moq: Optional[int] = None
+
+
+class PaginationParams(BaseModel):
+    """Shared pagination schema to keep limits consistent across endpoints."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    limit: int = Field(20, ge=1, description="Maximum items to return.")
+    offset: int = Field(0, ge=0, description="Items to skip before returning results.")

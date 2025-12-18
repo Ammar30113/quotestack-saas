@@ -1,10 +1,11 @@
 """Routing module for deal-related endpoints backed by Supabase."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from backend.core.auth import UserContext, get_current_user
-from backend.models.schemas import DealCreateRequest, DealUpdate
+from backend.models.schemas import DealCreateRequest, DealUpdate, PaginationParams
 from backend.services.supabase_client import get_supabase_client_for_user
+from backend.services.tasks import log_async_message
 
 router = APIRouter(prefix="/deals", tags=["deals"])
 
@@ -35,16 +36,27 @@ def _require_deal(deal_id: int, user: UserContext) -> dict:
     return _map_deal(rows[0])
 
 
+def _get_pagination_params(limit: int = Query(default=20, ge=1), offset: int = Query(default=0, ge=0)) -> PaginationParams:
+    # Keep pagination validation consistent across endpoints.
+    return PaginationParams(limit=limit, offset=offset)
+
+
 @router.get("/")
-def list_deals(user: UserContext = Depends(get_current_user)):
-    """Return a list of all deals for the authenticated user."""
+def list_deals(
+    pagination: PaginationParams = Depends(_get_pagination_params),
+    user: UserContext = Depends(get_current_user),
+):
+    """Return a paginated list of deals for the authenticated user."""
     supabase = _get_client(user)
     rows = supabase.select(
         "deals",
         select="id,company_name,currency,description,created_at",
         filters={"user_id": f"eq.{user.user_id}"},
+        limit=pagination.limit,
+        offset=pagination.offset,
     )
-    return [_map_deal(row) for row in rows]
+    deals = [_map_deal(row) for row in rows]
+    return {"deals": deals, "limit": pagination.limit, "offset": pagination.offset}
 
 
 @router.get("/{deal_id}")
@@ -55,7 +67,11 @@ def retrieve_deal(deal_id: int, user: UserContext = Depends(get_current_user)):
 
 
 @router.post("/", status_code=201)
-def create_deal(payload: DealCreateRequest, user: UserContext = Depends(get_current_user)):
+def create_deal(
+    payload: DealCreateRequest,
+    background_tasks: BackgroundTasks,
+    user: UserContext = Depends(get_current_user),
+):
     """Create a new deal from the provided payload."""
     supabase = _get_client(user)
     insert_data = payload.model_dump()
@@ -63,7 +79,15 @@ def create_deal(payload: DealCreateRequest, user: UserContext = Depends(get_curr
     rows = supabase.insert("deals", insert_data)
     if not rows:
         raise HTTPException(status_code=500, detail="Failed to create deal")
-    return _map_deal(rows[0])
+    created = _map_deal(rows[0])
+
+    # Example lightweight background hook; replace with real work as needed.
+    background_tasks.add_task(
+        log_async_message,
+        f"deal_created: user={user.user_id} deal_id={created['id']}",
+    )
+
+    return created
 
 
 @router.put("/{deal_id}")
