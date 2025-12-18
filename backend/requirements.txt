@@ -4,3 +4,4 @@ pydantic
 supabase
 httpx
 PyJWT
+sentry-sdk
