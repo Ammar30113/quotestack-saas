@@ -44,6 +44,21 @@ def _error_response(status_code: int, code: str, message: str):
     return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message}})
 
 
+_STATUS_CODE_TO_ERROR_CODE = {
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    409: "CONFLICT",
+    429: "RATE_LIMITED",
+}
+
+
+def _default_error_code(status_code: int) -> str:
+    if status_code >= 500:
+        return "INTERNAL_ERROR"
+    return _STATUS_CODE_TO_ERROR_CODE.get(status_code, "HTTP_ERROR")
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     # Standardize validation errors to match documented error schema.
@@ -54,7 +69,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def http_exception_handler(request: Request, exc: HTTPException):
     # Wrap HTTPExceptions in a consistent error envelope; preserves status codes.
     detail = exc.detail
-    code = "HTTP_ERROR"
+    code = _default_error_code(exc.status_code)
     message = "Request failed"
 
     if isinstance(detail, dict):
@@ -64,6 +79,12 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         message = detail
 
     return _error_response(status_code=exc.status_code, code=code, message=message)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    request_logger.exception("Unhandled exception")
+    return _error_response(status_code=500, code="INTERNAL_ERROR", message="Internal server error")
 
 
 @app.get("/")

@@ -1,5 +1,6 @@
 """Routing module for quote-related endpoints backed by Supabase."""
 
+from decimal import Decimal, InvalidOperation
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.core.auth import UserContext, get_current_user
@@ -9,11 +10,22 @@ from backend.services.supabase_client import get_supabase_client_for_user
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 
 
+def _format_amount(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    try:
+        return format(Decimal(str(value)), "f")
+    except (InvalidOperation, ValueError):
+        return str(value)
+
+
 def _map_quote(row: dict) -> dict:
     return {
         "id": row.get("id"),
         "deal_id": row.get("deal_id"),
-        "amount": row.get("price"),
+        "amount": _format_amount(row.get("price")),
         "currency": row.get("currency"),
         "supplier": row.get("supplier"),
         "lead_time_days": row.get("lead_time_days"),
@@ -54,8 +66,8 @@ def _quote_payload_to_db(payload: QuoteCreate | QuoteUpdate, user: UserContext) 
     db_data: dict = {"user_id": user.user_id}
     if "deal_id" in data:
         db_data["deal_id"] = data["deal_id"]
-    if "amount" in data:
-        db_data["price"] = float(data["amount"])
+    if "amount" in data and data["amount"] is not None:
+        db_data["price"] = _format_amount(data["amount"])
     if "currency" in data:
         db_data["currency"] = data["currency"]
     if "supplier" in data:
@@ -84,7 +96,7 @@ def list_quotes(
     filters = {"user_id": f"eq.{user.user_id}"}
     if deal_id is not None:
         filters["deal_id"] = f"eq.{deal_id}"
-    rows = supabase.select(
+    rows, total = supabase.select_with_count(
         "quotes",
         select="id,deal_id,price,currency,supplier,lead_time_days,moq,created_at",
         filters=filters,
@@ -92,7 +104,15 @@ def list_quotes(
         offset=pagination.offset,
     )
     quotes = [_map_quote(row) for row in rows]
-    return {"quotes": quotes, "limit": pagination.limit, "offset": pagination.offset}
+    total_count = total if total is not None else len(quotes)
+    has_more = pagination.offset + len(quotes) < total_count
+    return {
+        "items": quotes,
+        "limit": pagination.limit,
+        "offset": pagination.offset,
+        "total": total_count,
+        "has_more": has_more,
+    }
 
 
 @router.get("/{quote_id}")

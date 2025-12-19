@@ -1,7 +1,7 @@
 export type QuoteRow = {
   id?: number;
   supplier: string;
-  price: number;
+  price: string;
   currency: string;
   leadTimeDays: number;
   moq: number;

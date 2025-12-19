@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ApiDeal } from "@/lib/api";
-import { createDeal, getDeals } from "@/lib/api";
+import { ApiError, createDeal, getDeals } from "@/lib/api";
 import { formatDate } from "@/lib/mockData";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
@@ -25,6 +25,20 @@ export default function DealsPage() {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({ company_name: "", currency: "USD", description: "" });
   const [submitting, setSubmitting] = useState(false);
+
+  const handleApiError = (err: unknown, fallback: string) => {
+    if (err instanceof ApiError) {
+      if (err.code === "UNAUTHORIZED" || err.code === "FORBIDDEN") {
+        supabase?.auth.signOut();
+        router.replace("/login");
+        return;
+      }
+      setError(err.message);
+      return;
+    }
+    const message = err instanceof Error ? err.message : fallback;
+    setError(message);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -77,13 +91,12 @@ export default function DealsPage() {
     try {
       const deals = await getDeals(accessToken);
       if (mounted) {
-        setRows(deals);
+        setRows(deals.items);
         setError(null);
       }
     } catch (err) {
       if (mounted) {
-        const message = err instanceof Error ? err.message : "Failed to load deals";
-        setError(message);
+        handleApiError(err, "Failed to load deals");
       }
     } finally {
       if (mounted) {
@@ -103,8 +116,7 @@ export default function DealsPage() {
       setForm({ company_name: "", currency: "USD", description: "" });
       setError(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to create deal";
-      setError(message);
+      handleApiError(err, "Failed to create deal");
     } finally {
       setSubmitting(false);
     }

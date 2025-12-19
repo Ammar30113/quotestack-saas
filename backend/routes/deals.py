@@ -48,7 +48,7 @@ def list_deals(
 ):
     """Return a paginated list of deals for the authenticated user."""
     supabase = _get_client(user)
-    rows = supabase.select(
+    rows, total = supabase.select_with_count(
         "deals",
         select="id,company_name,currency,description,created_at",
         filters={"user_id": f"eq.{user.user_id}"},
@@ -56,7 +56,15 @@ def list_deals(
         offset=pagination.offset,
     )
     deals = [_map_deal(row) for row in rows]
-    return {"deals": deals, "limit": pagination.limit, "offset": pagination.offset}
+    total_count = total if total is not None else len(deals)
+    has_more = pagination.offset + len(deals) < total_count
+    return {
+        "items": deals,
+        "limit": pagination.limit,
+        "offset": pagination.offset,
+        "total": total_count,
+        "has_more": has_more,
+    }
 
 
 @router.get("/{deal_id}")

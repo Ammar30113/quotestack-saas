@@ -3,16 +3,42 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import Decimal from "decimal.js";
 
-import { createQuote, getDeal, getQuotesForDeal } from "@/lib/api";
+import { ApiError, createQuote, getDeal, getQuotesForDeal } from "@/lib/api";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import type { QuoteRow } from "@/lib/mockData";
 
 type Params = { id: string };
 
+const formatGroupedNumber = (value: string) => {
+  const [rawInteger, rawFraction] = value.split(".");
+  const sign = rawInteger.startsWith("-") ? "-" : "";
+  const digits = sign ? rawInteger.slice(1) : rawInteger;
+  const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return rawFraction ? `${sign}${grouped}.${rawFraction}` : `${sign}${grouped}`;
+};
+
+const parseDecimal = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    return new Decimal(trimmed);
+  } catch {
+    return null;
+  }
+};
+
+const formatAmount = (value: string, currency: string) => {
+  const amount = parseDecimal(value);
+  if (!amount) return "-";
+  const rounded = amount.toFixed(0);
+  return `${currency} ${formatGroupedNumber(rounded)}`;
+};
+
 const blankRow: QuoteRow = {
   supplier: "",
-  price: 0,
+  price: "",
   currency: "USD",
   leadTimeDays: 0,
   moq: 0
@@ -29,6 +55,20 @@ export default function DealDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingRowIndex, setSavingRowIndex] = useState<number | null>(null);
+
+  const handleApiError = (err: unknown, fallback: string) => {
+    if (err instanceof ApiError) {
+      if (err.code === "UNAUTHORIZED" || err.code === "FORBIDDEN") {
+        supabase?.auth.signOut();
+        router.replace("/login");
+        return;
+      }
+      setError(err.message);
+      return;
+    }
+    const message = err instanceof Error ? err.message : fallback;
+    setError(message);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -87,10 +127,10 @@ export default function DealDetailPage() {
       setLoading(true);
       try {
         const [deal, quotes] = await Promise.all([getDeal(dealId, accessToken), getQuotesForDeal(dealId, accessToken)]);
-        const mapped = quotes.map<QuoteRow>((quote) => ({
+        const mapped = quotes.items.map<QuoteRow>((quote) => ({
           id: quote.id,
           supplier: quote.supplier || `Supplier ${quote.id}`,
-          price: quote.amount,
+          price: quote.amount || "",
           currency: quote.currency || "USD",
           leadTimeDays: quote.lead_time_days || 0,
           moq: quote.moq || 0
@@ -102,8 +142,7 @@ export default function DealDetailPage() {
         }
       } catch (err) {
         if (mounted) {
-          const message = err instanceof Error ? err.message : "Failed to load deal";
-          setError(message);
+          handleApiError(err, "Failed to load deal");
         }
       } finally {
         if (mounted) {
@@ -116,12 +155,14 @@ export default function DealDetailPage() {
 
   const submitRow = async (index: number) => {
     const row = rows[index];
-    if (!token || row.id || !row.supplier || !row.price || savingRowIndex !== null) return;
+    const normalizedPrice = row.price.trim();
+    const price = parseDecimal(normalizedPrice);
+    if (!token || row.id || !row.supplier || !price || price.lte(0) || savingRowIndex !== null) return;
 
     setSavingRowIndex(index);
     try {
       await createQuote(token, dealId, {
-        amount: row.price,
+        amount: normalizedPrice,
         currency: row.currency,
         supplier: row.supplier,
         leadTimeDays: row.leadTimeDays,
@@ -129,8 +170,7 @@ export default function DealDetailPage() {
       });
       await fetchData(token);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to save quote";
-      setError(message);
+      handleApiError(err, "Failed to save quote");
     } finally {
       setSavingRowIndex(null);
     }
@@ -140,7 +180,10 @@ export default function DealDetailPage() {
     setRows((current) =>
       current.map((row, idx) => {
         if (idx !== index) return row;
-        if (key === "price" || key === "leadTimeDays" || key === "moq") {
+        if (key === "price") {
+          return { ...row, [key]: value };
+        }
+        if (key === "leadTimeDays" || key === "moq") {
           return { ...row, [key]: Number(value) || 0 };
         }
         return { ...row, [key]: value };
@@ -153,7 +196,13 @@ export default function DealDetailPage() {
     [rows]
   );
 
-  const bestPrice = activeRows.length ? Math.min(...activeRows.map((row) => row.price)) : undefined;
+  const bestPrice = useMemo(() => {
+    const prices = activeRows
+      .map((row) => parseDecimal(row.price))
+      .filter((value): value is Decimal => value !== null && value.greaterThan(0));
+    if (!prices.length) return null;
+    return prices.reduce((min, value) => (value.lessThan(min) ? value : min));
+  }, [activeRows]);
   const bestLeadTime = activeRows.length
     ? Math.min(...activeRows.map((row) => row.leadTimeDays))
     : undefined;
@@ -231,7 +280,8 @@ export default function DealDetailPage() {
                   </td>
                   <td>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       value={row.price}
                       onChange={(e) => updateRow(index, "price", e.target.value)}
                       onBlur={() => submitRow(index)}
@@ -297,7 +347,8 @@ export default function DealDetailPage() {
               <tr>
                 <td className="font-medium text-slate-200">Price</td>
                 {activeRows.map((row, index) => {
-                  const isBest = bestPrice !== undefined && row.price === bestPrice;
+                  const amount = parseDecimal(row.price);
+                  const isBest = Boolean(bestPrice && amount && amount.equals(bestPrice));
                   return (
                     <td
                       key={`${row.supplier || "new"}-${index}-price`}
@@ -307,11 +358,7 @@ export default function DealDetailPage() {
                           : "text-slate-200"
                       }`}
                     >
-                      {row.price.toLocaleString(undefined, {
-                        style: "currency",
-                        currency: row.currency || "USD",
-                        maximumFractionDigits: 0
-                      })}
+                      {formatAmount(row.price, row.currency || "USD")}
                     </td>
                   );
                 })}
