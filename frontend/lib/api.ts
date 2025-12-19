@@ -1,4 +1,4 @@
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080").replace(/\/$/, "");
 
 export type ApiListResponse<T> = {
   items: T[];
@@ -134,6 +134,24 @@ export async function createQuote(token: string, dealId: number, payload: Create
 
   const data = await request<{ quote: ApiQuote; message?: string }>("/quotes", {
     method: "POST",
+    body: JSON.stringify(body),
+    token
+  });
+
+  return data.quote;
+}
+
+export async function updateQuote(token: string, quoteId: number, payload: CreateQuotePayload) {
+  const body = {
+    amount: payload.amount,
+    currency: payload.currency,
+    supplier: payload.supplier,
+    lead_time: payload.leadTimeDays,
+    moq: payload.moq
+  };
+
+  const data = await request<{ quote: ApiQuote; message?: string }>(`/quotes/${quoteId}`, {
+    method: "PUT",
     body: JSON.stringify(body),
     token
   });

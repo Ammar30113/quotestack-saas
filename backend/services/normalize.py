@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # pragma: no cover
     # QuoteDraft should describe the normalized structure for a supplier quote,
     # including parsed fields like supplier metadata, line items, currency, and dates.
-    from backend.models import QuoteDraft
+    from models import QuoteDraft
 
 
 def normalize_quote_input(raw_text: str) -> "QuoteDraft":

@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Decimal from "decimal.js";
 
-import { ApiError, createQuote, getDeal, getQuotesForDeal } from "@/lib/api";
+import { ApiError, createQuote, getDeal, getQuotesForDeal, updateQuote } from "@/lib/api";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import type { QuoteRow } from "@/lib/mockData";
 
@@ -155,20 +155,44 @@ export default function DealDetailPage() {
 
   const submitRow = async (index: number) => {
     const row = rows[index];
+    if (!token || savingRowIndex !== null) return;
     const normalizedPrice = row.price.trim();
     const price = parseDecimal(normalizedPrice);
-    if (!token || row.id || !row.supplier || !price || price.lte(0) || savingRowIndex !== null) return;
+    if (!row.supplier || !price || price.lte(0)) return;
+    const isExisting = Boolean(row.id);
 
     setSavingRowIndex(index);
     try {
-      await createQuote(token, dealId, {
-        amount: normalizedPrice,
-        currency: row.currency,
-        supplier: row.supplier,
-        leadTimeDays: row.leadTimeDays,
-        moq: row.moq
-      });
-      await fetchData(token);
+      const quote = isExisting
+        ? await updateQuote(token, row.id!, {
+            amount: normalizedPrice,
+            currency: row.currency,
+            supplier: row.supplier,
+            leadTimeDays: row.leadTimeDays,
+            moq: row.moq
+          })
+        : await createQuote(token, dealId, {
+            amount: normalizedPrice,
+            currency: row.currency,
+            supplier: row.supplier,
+            leadTimeDays: row.leadTimeDays,
+            moq: row.moq
+          });
+
+      const updatedRow: QuoteRow = {
+        id: quote.id,
+        supplier: quote.supplier || `Supplier ${quote.id}`,
+        price: quote.amount || "",
+        currency: quote.currency || "USD",
+        leadTimeDays: quote.lead_time_days || 0,
+        moq: quote.moq || 0
+      };
+
+      setRows((current) => current.map((item, idx) => (idx === index ? updatedRow : item)));
+
+      if (!isExisting) {
+        await fetchData(token);
+      }
     } catch (err) {
       handleApiError(err, "Failed to save quote");
     } finally {

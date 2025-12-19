@@ -142,9 +142,14 @@ def update_quote(quote_id: int, payload: QuoteUpdate, user: UserContext = Depend
     """Update an existing quote with new data."""
     existing = _require_quote(quote_id, user)
 
+    raw_data = payload.model_dump(exclude_unset=True, by_alias=True)
+    if not raw_data:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "NO_FIELDS_TO_UPDATE", "message": "No fields provided to update"},
+        )
+
     update_data = _quote_payload_to_db(payload, user)
-    if not update_data:
-        return {"quote": _map_quote(existing), "message": "Quote updated"}
 
     if "deal_id" in update_data:
         _ensure_deal_exists(update_data["deal_id"], user)
