@@ -30,10 +30,16 @@ if sentry_dsn:
 app = FastAPI()
 
 frontend_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
+allow_origins = [frontend_url] if frontend_url else []
+if not frontend_url:
+    request_logger.warning("FRONTEND_URL is not set; CORS will block browser requests.")
+elif not frontend_url.startswith("https://"):
+    request_logger.warning("FRONTEND_URL should include https:// for production deployments.")
+request_logger.info("CORS allow_origins=%s", allow_origins)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[frontend_url] if frontend_url else [],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin"],

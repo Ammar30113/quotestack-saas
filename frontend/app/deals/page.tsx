@@ -28,16 +28,38 @@ export default function DealsPage() {
 
   const handleApiError = (err: unknown, fallback: string) => {
     if (err instanceof ApiError) {
+      console.error("[Deals] API request failed", {
+        url: err.url,
+        status: err.status || undefined,
+        responseBody: err.responseBody
+      });
       if (err.code === "UNAUTHORIZED" || err.code === "FORBIDDEN") {
         supabase?.auth.signOut();
         router.replace("/login");
         return;
       }
+      if (err.code === "NETWORK_ERROR") {
+        setError("Unable to reach the backend. Check your connection or configuration and try again.");
+        return;
+      }
+      setError(err.message || fallback);
+      return;
+    }
+    if (err instanceof Error) {
+      console.error("[Deals] API request failed", {
+        url: "unknown",
+        status: undefined,
+        responseBody: err.message
+      });
+      if (err.message.toLowerCase().includes("failed to fetch")) {
+        setError("Unable to reach the backend. Check your connection or configuration and try again.");
+        return;
+      }
       setError(err.message);
       return;
     }
-    const message = err instanceof Error ? err.message : fallback;
-    setError(message);
+    console.error("[Deals] API request failed", { url: "unknown", status: undefined, responseBody: err });
+    setError(fallback);
   };
 
   useEffect(() => {

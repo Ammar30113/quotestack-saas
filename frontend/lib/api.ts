@@ -1,4 +1,6 @@
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080").replace(/\/$/, "");
+const RAW_API_BASE =
+  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
+const API_BASE = RAW_API_BASE.replace(/\/$/, "");
 
 export type ApiListResponse<T> = {
   items: T[];
@@ -45,32 +47,45 @@ function defaultErrorCode(status: number) {
 export class ApiError extends Error {
   code: string;
   status: number;
+  url?: string;
+  responseBody?: unknown;
 
-  constructor(message: string, code: string, status: number) {
+  constructor(message: string, code: string, status: number, options?: { url?: string; responseBody?: unknown }) {
     super(message);
     this.name = "ApiError";
     this.code = code;
     this.status = status;
+    this.url = options?.url;
+    this.responseBody = options?.responseBody;
   }
 }
 
 async function request<T>(path: string, options?: RequestOptions): Promise<T> {
   const { token, ...rest } = options || {};
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...rest,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(rest.headers || {})
-    },
-    cache: "no-store"
-  });
+  const url = `${API_BASE}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...rest,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(rest.headers || {})
+      },
+      cache: "no-store"
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Network request failed";
+    throw new ApiError(message, "NETWORK_ERROR", 0, { url });
+  }
 
   if (!res.ok) {
     let message = `Request failed with status ${res.status}`;
     let code = defaultErrorCode(res.status);
+    let responseBody: unknown;
     try {
       const data = await res.json();
+      responseBody = data;
       if (data?.error) {
         if (typeof data.error.code === "string") {
           code = data.error.code;
@@ -84,7 +99,7 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
     } catch {
       // ignore json parse errors and keep default message
     }
-    throw new ApiError(message, code, res.status);
+    throw new ApiError(message, code, res.status, { url, responseBody });
   }
 
   return res.json() as Promise<T>;
