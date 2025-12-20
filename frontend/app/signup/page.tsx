@@ -7,12 +7,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
-export default function LoginPage() {
+export default function SignupPage() {
   const router = useRouter();
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -40,14 +41,21 @@ export default function LoginPage() {
     }
     setLoading(true);
     setError(null);
-    const { error: signInError } = await supabase.auth.signInWithPassword({
+    setSuccess(null);
+
+    const emailRedirectTo = `${window.location.origin}/login`;
+    const { data, error: signUpError } = await supabase.auth.signUp({
       email,
-      password
+      password,
+      options: { emailRedirectTo }
     });
-    if (signInError) {
-      setError(signInError.message || "Unable to sign in");
-    } else {
+
+    if (signUpError) {
+      setError(signUpError.message || "Unable to create account");
+    } else if (data.session) {
       router.replace("/deals");
+    } else {
+      setSuccess("Check your email to confirm your account, then sign in.");
     }
     setLoading(false);
   };
@@ -56,8 +64,8 @@ export default function LoginPage() {
     <div className="mx-auto max-w-md space-y-6 rounded-lg border border-slate-800 bg-slate-900/50 p-6 shadow-lg">
       <div className="space-y-2 text-center">
         <p className="text-sm uppercase tracking-wide text-slate-400">QuoteStack</p>
-        <h1 className="text-2xl font-semibold text-white">Sign in</h1>
-        <p className="text-sm text-slate-400">Access your deals and quotes.</p>
+        <h1 className="text-2xl font-semibold text-white">Create account</h1>
+        <p className="text-sm text-slate-400">Sign up to start managing deals.</p>
       </div>
       <form className="space-y-4" onSubmit={handleSubmit}>
         <label className="block text-sm text-slate-300">
@@ -81,18 +89,19 @@ export default function LoginPage() {
           />
         </label>
         {error && <div className="rounded-md bg-rose-900/40 px-3 py-2 text-sm text-rose-200">{error}</div>}
+        {success && <div className="rounded-md bg-emerald-900/40 px-3 py-2 text-sm text-emerald-200">{success}</div>}
         <button
           type="submit"
           disabled={loading}
           className="w-full rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {loading ? "Signing in..." : "Sign in"}
+          {loading ? "Creating account..." : "Create account"}
         </button>
       </form>
       <div className="text-center text-sm text-slate-400">
-        No account yet?{" "}
-        <Link className="text-brand-300 hover:text-brand-200" href="/signup">
-          Create one
+        Already have an account?{" "}
+        <Link className="text-brand-300 hover:text-brand-200" href="/login">
+          Sign in
         </Link>
       </div>
     </div>
