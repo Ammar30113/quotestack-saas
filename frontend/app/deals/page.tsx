@@ -16,6 +16,36 @@ type FormState = {
   description: string;
 };
 
+const CURRENCY_OPTIONS = [
+  "USD",
+  "EUR",
+  "GBP",
+  "CAD",
+  "AUD",
+  "NZD",
+  "JPY",
+  "CNY",
+  "INR",
+  "SGD",
+  "HKD",
+  "KRW",
+  "AED",
+  "SAR",
+  "CHF",
+  "SEK",
+  "NOK",
+  "DKK",
+  "PLN",
+  "BRL",
+  "MXN",
+  "ZAR",
+  "TRY",
+  "THB",
+  "IDR",
+  "PHP",
+  "VND"
+];
+
 export default function DealsPage() {
   const router = useRouter();
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
@@ -24,6 +54,7 @@ export default function DealsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({ company_name: "", currency: "USD", description: "" });
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -40,11 +71,7 @@ export default function DealsPage() {
         router.replace("/login");
         return;
       }
-      if (err.code === "NETWORK_ERROR") {
-        setMessage("Unable to reach the backend. Check your connection or configuration and try again.");
-        return;
-      }
-      setMessage(err.message || fallback);
+      setMessage(fallback);
       return;
     }
     if (err instanceof Error) {
@@ -53,11 +80,7 @@ export default function DealsPage() {
         status: undefined,
         responseBody: err.message
       });
-      if (err.message.toLowerCase().includes("failed to fetch")) {
-        setMessage("Unable to reach the backend. Check your connection or configuration and try again.");
-        return;
-      }
-      setMessage(err.message || fallback);
+      setMessage(fallback);
       return;
     }
     console.error("[Deals] API request failed", { url: "unknown", status: undefined, responseBody: err });
@@ -70,7 +93,7 @@ export default function DealsPage() {
     const ensureSession = async () => {
       const client = getSupabaseBrowserClient();
       if (!client) {
-        setError("Supabase client not configured");
+        setError("We couldn’t open your deals right now. This is on our side. Please try again.");
         setLoading(false);
         return;
       }
@@ -120,7 +143,7 @@ export default function DealsPage() {
       }
     } catch (err) {
       if (mounted) {
-        handleApiError(err, "We couldn't load your deals. Please try again.", setError);
+        handleApiError(err, "We couldn’t load your deals right now. This is on our side. Please try again.", setError);
       }
     } finally {
       if (mounted) {
@@ -138,10 +161,11 @@ export default function DealsPage() {
       const newDeal = await createDeal(token, form);
       setRows((current) => [newDeal, ...current]);
       setForm({ company_name: "", currency: "USD", description: "" });
+      setSuccessMessage("Deal created. You can edit these details anytime.");
       setFormError(null);
       setIsCreateOpen(false);
     } catch (err) {
-      handleApiError(err, "We couldn't create the deal. Please try again.", setFormError);
+      handleApiError(err, "We couldn’t create the deal right now. This is on our side. Please try again.", setFormError);
     } finally {
       setSubmitting(false);
     }
@@ -163,13 +187,20 @@ export default function DealsPage() {
     loadDeals(token);
   };
 
+  useEffect(() => {
+    if (!successMessage) return;
+    const timer = setTimeout(() => setSuccessMessage(null), 4000);
+    return () => clearTimeout(timer);
+  }, [successMessage]);
+
+  const showEmptyState = !loading && !error && rows.length === 0;
+
   return (
     <div className="space-y-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1">
-          <p className="text-sm uppercase tracking-wide text-slate-400">Deals</p>
-          <h1 className="text-3xl font-semibold text-white">Pipeline</h1>
-          <p className="text-sm text-slate-400">Track opportunities and compare supplier quotes.</p>
+          <h1 className="text-3xl font-semibold text-white">Deals</h1>
+          <p className="text-sm text-slate-400">View your deals and their quotes in one place.</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -180,16 +211,24 @@ export default function DealsPage() {
           >
             Refresh
           </button>
-          <button
-            type="button"
-            onClick={openCreate}
-            disabled={!token}
-            className="inline-flex items-center gap-2 rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            New deal
-          </button>
+          {!showEmptyState && (
+            <button
+              type="button"
+              onClick={openCreate}
+              disabled={!token}
+              className="inline-flex items-center gap-2 rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              New deal
+            </button>
+          )}
         </div>
       </header>
+
+      {successMessage && (
+        <div className="rounded-lg border border-emerald-700/40 bg-emerald-900/30 px-4 py-3 text-sm text-emerald-100">
+          {successMessage}
+        </div>
+      )}
 
       <div className="card overflow-hidden">
         <table>
@@ -227,13 +266,15 @@ export default function DealsPage() {
               <tr>
                 <td colSpan={4} className="py-10 text-center">
                   <p className="text-sm font-medium text-slate-200">No deals yet</p>
-                  <p className="mt-2 text-sm text-slate-400">Create your first deal to start collecting quotes.</p>
+                  <p className="mt-2 text-sm text-slate-400">
+                    Create a deal to keep pricing, suppliers, and quotes organized.
+                  </p>
                   <button
                     type="button"
                     onClick={openCreate}
                     className="mt-4 inline-flex items-center gap-2 rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-400"
                   >
-                    Create deal
+                    New deal
                   </button>
                 </td>
               </tr>
@@ -266,7 +307,9 @@ export default function DealsPage() {
             <div className="flex items-start justify-between">
               <div>
                 <h2 className="text-xl font-semibold text-white">New deal</h2>
-                <p className="mt-1 text-sm text-slate-400">Add the company and currency to get started.</p>
+                <p className="mt-1 text-sm text-slate-400">
+                  Add the basics now. You can edit everything later.
+                </p>
               </div>
               <button
                 type="button"
@@ -289,13 +332,18 @@ export default function DealsPage() {
                 </label>
                 <label className="block text-sm text-slate-300">
                   <span className="mb-1 block text-slate-400">Currency</span>
-                  <input
+                  <select
                     required
                     value={form.currency}
-                    onChange={(e) => setForm((prev) => ({ ...prev, currency: e.target.value.toUpperCase() }))}
-                    maxLength={3}
-                    className="w-full rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm uppercase text-white outline-none focus:border-brand-400"
-                  />
+                    onChange={(e) => setForm((prev) => ({ ...prev, currency: e.target.value }))}
+                    className="w-full rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none focus:border-brand-400"
+                  >
+                    {CURRENCY_OPTIONS.map((currency) => (
+                      <option key={currency} value={currency}>
+                        {currency}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="block text-sm text-slate-300">
                   <span className="mb-1 block text-slate-400">Description</span>
@@ -306,6 +354,7 @@ export default function DealsPage() {
                   />
                 </label>
               </div>
+              <p className="text-xs text-slate-400">You can update or change this deal anytime.</p>
               {formError && <div className="rounded-md bg-rose-900/40 px-3 py-2 text-sm text-rose-200">{formError}</div>}
               <div className="flex items-center justify-end gap-3">
                 <button
