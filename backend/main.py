@@ -5,13 +5,12 @@ import time
 import uuid
 
 import sentry_sdk
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 
-from backend.core.auth import UserContext, get_current_user
 from backend.routes import deals, quotes
 
 logging.basicConfig(level=logging.INFO)
@@ -94,7 +93,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 @app.get("/")
-async def root(_: UserContext = Depends(get_current_user)):
+async def root():
     return {"status": "ok", "service": "quotestack-backend"}
 
 
