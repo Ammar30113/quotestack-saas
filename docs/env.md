@@ -11,7 +11,7 @@ This project uses different environment variables for the frontend (Vercel) and 
 
 ## Backend (Railway)
 
-- `FRONTEND_URL`: Allowed browser origin for CORS, must include `https://` (e.g. `https://quotestack-saas.vercel.app`)
+- `FRONTEND_URL`: Allowed browser origin(s) for CORS (comma-separated), must include `https://` (e.g. `https://quotestack-saas.vercel.app,https://staging-quotestack.vercel.app`)
 - `SUPABASE_URL`: Supabase project URL
 - `SUPABASE_ANON_KEY`: Supabase anon public key
 - `SUPABASE_JWT_SECRET`: Required for legacy HS256 Supabase JWT verification (do not use the service role key)

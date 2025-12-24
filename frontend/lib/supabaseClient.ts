@@ -1,4 +1,4 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js/dist/module/index.js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 let browserClient: SupabaseClient | null = null;
 

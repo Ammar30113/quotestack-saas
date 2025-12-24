@@ -31,12 +31,12 @@ class QuoteCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    deal_id: int
-    amount: Decimal
+    deal_id: int = Field(..., ge=1)
+    amount: Decimal = Field(..., gt=0)
     supplier: Optional[str] = None
-    currency: Optional[str] = None
-    lead_time_days: Optional[int] = Field(None, alias="lead_time")
-    moq: Optional[int] = None
+    currency: Optional[constr(pattern=r"^[A-Z]{3}$", min_length=3, max_length=3)] = None
+    lead_time_days: Optional[int] = Field(None, alias="lead_time", ge=0)
+    moq: Optional[int] = Field(None, ge=0)
 
 
 class QuoteUpdate(BaseModel):
@@ -44,12 +44,12 @@ class QuoteUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    deal_id: Optional[int] = None
-    amount: Optional[Decimal] = None
+    deal_id: Optional[int] = Field(None, ge=1)
+    amount: Optional[Decimal] = Field(None, gt=0)
     supplier: Optional[str] = None
-    currency: Optional[str] = None
-    lead_time_days: Optional[int] = Field(None, alias="lead_time")
-    moq: Optional[int] = None
+    currency: Optional[constr(pattern=r"^[A-Z]{3}$", min_length=3, max_length=3)] = None
+    lead_time_days: Optional[int] = Field(None, alias="lead_time", ge=0)
+    moq: Optional[int] = Field(None, ge=0)
 
 
 class PaginationParams(BaseModel):

@@ -120,8 +120,9 @@ export default function DealsPage() {
           router.replace("/login");
           return;
         }
+        if (!mounted) return;
         setToken(session.access_token);
-        loadDeals(session.access_token);
+        loadDeals(session.access_token, mounted);
       });
       unsubscribe = () => authListener?.subscription.unsubscribe();
     }
@@ -134,6 +135,7 @@ export default function DealsPage() {
   }, []);
 
   const loadDeals = async (accessToken: string, mounted = true) => {
+    if (!mounted) return;
     setLoading(true);
     try {
       const deals = await getDeals(accessToken);

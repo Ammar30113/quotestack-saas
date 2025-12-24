@@ -107,9 +107,10 @@ export default function DealDetailPage() {
           router.replace("/login");
           return;
         }
+        if (!mounted) return;
         setToken(session.access_token);
         if (Number.isFinite(dealId)) {
-          fetchData(session.access_token);
+          fetchData(session.access_token, mounted);
         }
       });
       unsubscribe = () => authListener?.subscription.unsubscribe();
@@ -124,6 +125,7 @@ export default function DealDetailPage() {
 
   const fetchData = useCallback(
     async (accessToken: string, mounted = true) => {
+      if (!mounted) return;
       setLoading(true);
       try {
         const [deal, quotes] = await Promise.all([getDeal(dealId, accessToken), getQuotesForDeal(dealId, accessToken)]);
