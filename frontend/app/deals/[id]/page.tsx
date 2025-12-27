@@ -229,9 +229,41 @@ export default function DealDetailPage() {
     if (!prices.length) return null;
     return prices.reduce((min, value) => (value.lessThan(min) ? value : min));
   }, [activeRows]);
-  const bestLeadTime = activeRows.length
-    ? Math.min(...activeRows.map((row) => row.leadTimeDays))
-    : undefined;
+  const bestLeadTime = useMemo(() => {
+    const leadTimes = activeRows.map((row) => row.leadTimeDays).filter((value) => value > 0);
+    return leadTimes.length ? Math.min(...leadTimes) : undefined;
+  }, [activeRows]);
+
+  const bestValueIndex = useMemo(() => {
+    const candidates = activeRows
+      .map((row, index) => {
+        const amount = parseDecimal(row.price);
+        if (!amount || amount.lte(0) || row.leadTimeDays <= 0) return null;
+        return { index, amount, leadTimeDays: row.leadTimeDays };
+      })
+      .filter((row): row is { index: number; amount: Decimal; leadTimeDays: number } => row !== null);
+
+    if (!candidates.length) return null;
+
+    const byPrice = [...candidates].sort((a, b) => a.amount.comparedTo(b.amount));
+    const byLeadTime = [...candidates].sort((a, b) => a.leadTimeDays - b.leadTimeDays);
+
+    const priceRank = new Map(byPrice.map((row, rank) => [row.index, rank]));
+    const leadTimeRank = new Map(byLeadTime.map((row, rank) => [row.index, rank]));
+
+    let bestIndex: number | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (const row of candidates) {
+      const score = (priceRank.get(row.index) ?? 0) + (leadTimeRank.get(row.index) ?? 0);
+      if (score < bestScore) {
+        bestScore = score;
+        bestIndex = row.index;
+      }
+    }
+
+    return bestIndex;
+  }, [activeRows]);
 
   if (!Number.isFinite(dealId)) {
     return (
@@ -403,6 +435,24 @@ export default function DealDetailPage() {
                       }`}
                     >
                       {row.leadTimeDays} days
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr>
+                <td className="font-medium text-slate-200">Best value</td>
+                {activeRows.map((row, index) => {
+                  const isBestValue = bestValueIndex !== null && index === bestValueIndex;
+                  return (
+                    <td
+                      key={`${row.supplier || "new"}-${index}-value`}
+                      className={`text-sm ${
+                        isBestValue
+                          ? "border border-amber-600 bg-amber-900/40 text-amber-100"
+                          : "text-slate-400"
+                      }`}
+                    >
+                      {isBestValue ? "Best value" : "—"}
                     </td>
                   );
                 })}
