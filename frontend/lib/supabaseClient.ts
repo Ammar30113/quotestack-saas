@@ -1,6 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-// Use the module entrypoint to avoid the wrapper.mjs default-export build error.
-import { createClient } from "@supabase/supabase-js/dist/module/index.js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 let browserClient: SupabaseClient | null = null;
 
