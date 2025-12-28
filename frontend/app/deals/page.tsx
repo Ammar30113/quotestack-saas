@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -58,6 +58,7 @@ export default function DealsPage() {
   const [form, setForm] = useState<FormState>({ company_name: "", currency: "USD", description: "" });
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const isMounted = useRef(true);
 
   const handleApiError = (err: unknown, fallback: string, setMessage: (message: string) => void) => {
     if (err instanceof ApiError) {
@@ -88,26 +89,27 @@ export default function DealsPage() {
   };
 
   useEffect(() => {
-    let mounted = true;
+    isMounted.current = true;
 
     const ensureSession = async () => {
       const client = getSupabaseBrowserClient();
       if (!client) {
+        if (!isMounted.current) return;
         setError("We couldn’t open your deals right now. This is on our side. Please try again.");
         setLoading(false);
         return;
       }
+      if (!isMounted.current) return;
       setSupabase(client);
       const { data } = await client.auth.getSession();
+      if (!isMounted.current) return;
       const session = data.session;
       if (!session) {
         router.replace("/login");
         return;
       }
-      if (mounted) {
-        setToken(session.access_token);
-        await loadDeals(session.access_token, mounted);
-      }
+      setToken(session.access_token);
+      await loadDeals(session.access_token);
     };
 
     ensureSession();
@@ -120,35 +122,35 @@ export default function DealsPage() {
           router.replace("/login");
           return;
         }
-        if (!mounted) return;
+        if (!isMounted.current) return;
         setToken(session.access_token);
-        loadDeals(session.access_token, mounted);
+        loadDeals(session.access_token);
       });
       unsubscribe = () => authListener?.subscription.unsubscribe();
     }
 
     return () => {
-      mounted = false;
+      isMounted.current = false;
       unsubscribe?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadDeals = async (accessToken: string, mounted = true) => {
-    if (!mounted) return;
+  const loadDeals = async (accessToken: string) => {
+    if (!isMounted.current) return;
     setLoading(true);
     try {
       const deals = await getDeals(accessToken);
-      if (mounted) {
+      if (isMounted.current) {
         setRows(deals.items);
         setError(null);
       }
     } catch (err) {
-      if (mounted) {
+      if (isMounted.current) {
         handleApiError(err, "We couldn’t load your deals right now. This is on our side. Please try again.", setError);
       }
     } finally {
-      if (mounted) {
+      if (isMounted.current) {
         setLoading(false);
       }
     }

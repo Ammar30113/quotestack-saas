@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Decimal from "decimal.js";
@@ -53,44 +53,47 @@ export default function DealDetailPage() {
   const [rows, setRows] = useState<QuoteRow[]>([]);
   const [dealName, setDealName] = useState<string>("");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [savingRowIndex, setSavingRowIndex] = useState<number | null>(null);
+  const isMounted = useRef(true);
 
-  const handleApiError = (err: unknown, fallback: string) => {
+  const handleApiError = (err: unknown, fallback: string, setMessage: (message: string) => void) => {
     if (err instanceof ApiError) {
       if (err.code === "UNAUTHORIZED" || err.code === "FORBIDDEN") {
         supabase?.auth.signOut();
         router.replace("/login");
         return;
       }
-      setError(err.message);
+      setMessage(err.message || fallback);
       return;
     }
     const message = err instanceof Error ? err.message : fallback;
-    setError(message);
+    setMessage(message);
   };
 
   useEffect(() => {
-    let mounted = true;
+    isMounted.current = true;
 
     const ensureSession = async () => {
       const client = getSupabaseBrowserClient();
       if (!client) {
-        setError("Supabase client not configured");
+        if (!isMounted.current) return;
+        setLoadError("Supabase client not configured");
         setLoading(false);
         return;
       }
+      if (!isMounted.current) return;
       setSupabase(client);
       const { data } = await client.auth.getSession();
+      if (!isMounted.current) return;
       const session = data.session;
       if (!session) {
         router.replace("/login");
         return;
       }
-      if (mounted) {
-        setToken(session.access_token);
-        await fetchData(session.access_token, mounted);
-      }
+      setToken(session.access_token);
+      await fetchData(session.access_token);
     };
 
     if (Number.isFinite(dealId)) {
@@ -107,25 +110,25 @@ export default function DealDetailPage() {
           router.replace("/login");
           return;
         }
-        if (!mounted) return;
+        if (!isMounted.current) return;
         setToken(session.access_token);
         if (Number.isFinite(dealId)) {
-          fetchData(session.access_token, mounted);
+          fetchData(session.access_token);
         }
       });
       unsubscribe = () => authListener?.subscription.unsubscribe();
     }
 
     return () => {
-      mounted = false;
+      isMounted.current = false;
       unsubscribe?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealId]);
 
   const fetchData = useCallback(
-    async (accessToken: string, mounted = true) => {
-      if (!mounted) return;
+    async (accessToken: string) => {
+      if (!isMounted.current) return;
       setLoading(true);
       try {
         const [deal, quotes] = await Promise.all([getDeal(dealId, accessToken), getQuotesForDeal(dealId, accessToken)]);
@@ -137,23 +140,26 @@ export default function DealDetailPage() {
           leadTimeDays: quote.lead_time_days || 0,
           moq: quote.moq || 0
         }));
-        if (mounted) {
+        if (isMounted.current) {
           setDealName(deal.company_name);
           setRows([...mapped, blankRow]);
-          setError(null);
+          setLoadError(null);
+          setSaveError(null);
         }
       } catch (err) {
-        if (mounted) {
-          handleApiError(err, "Failed to load deal");
+        if (isMounted.current) {
+          handleApiError(err, "Failed to load deal", setLoadError);
         }
       } finally {
-        if (mounted) {
+        if (isMounted.current) {
           setLoading(false);
         }
       }
     },
     [dealId]
   );
+
+  const getRowKey = (row: QuoteRow, index: number) => (row.id ? `quote-${row.id}` : `draft-${index}`);
 
   const submitRow = async (index: number) => {
     const row = rows[index];
@@ -163,6 +169,7 @@ export default function DealDetailPage() {
     if (!row.supplier || !price || price.lte(0)) return;
     const isExisting = Boolean(row.id);
 
+    setSaveError(null);
     setSavingRowIndex(index);
     try {
       const quote = isExisting
@@ -191,12 +198,13 @@ export default function DealDetailPage() {
       };
 
       setRows((current) => current.map((item, idx) => (idx === index ? updatedRow : item)));
+      setSaveError(null);
 
       if (!isExisting) {
         await fetchData(token);
       }
     } catch (err) {
-      handleApiError(err, "Failed to save quote");
+      handleApiError(err, "Failed to save quote", setSaveError);
     } finally {
       setSavingRowIndex(null);
     }
@@ -284,12 +292,12 @@ export default function DealDetailPage() {
     );
   }
 
-  if (error) {
+  if (loadError) {
     return (
       <div className="card p-6 text-slate-200">
         <p className="text-sm uppercase tracking-wide text-slate-400">Deals</p>
         <h1 className="text-xl font-semibold text-white">Unable to load deal</h1>
-        <p className="mt-2 text-rose-300">{error}</p>
+        <p className="mt-2 text-rose-300">{loadError}</p>
       </div>
     );
   }
@@ -314,6 +322,11 @@ export default function DealDetailPage() {
             Edit supplier proposals inline. New rows save on blur.
           </p>
         </div>
+        {saveError && (
+          <div className="rounded-lg border border-rose-700/40 bg-rose-900/30 px-4 py-3 text-sm text-rose-100">
+            {saveError}
+          </div>
+        )}
         <div className="card overflow-hidden">
           <table>
             <thead>
@@ -327,7 +340,7 @@ export default function DealDetailPage() {
             </thead>
             <tbody>
               {rows.map((row, index) => (
-                <tr key={`${row.supplier || "new"}-${index}`}>
+                <tr key={getRowKey(row, index)}>
                   <td>
                     <input
                       value={row.supplier}
@@ -395,7 +408,7 @@ export default function DealDetailPage() {
               <tr>
                 <th className="w-1/5">Metric</th>
                 {activeRows.map((row, index) => (
-                  <th key={`${row.supplier || "new"}-${index}`} className="text-white">
+                  <th key={getRowKey(row, index)} className="text-white">
                     {row.supplier || "New supplier"}
                   </th>
                 ))}
@@ -409,7 +422,7 @@ export default function DealDetailPage() {
                   const isBest = Boolean(bestPrice && amount && amount.equals(bestPrice));
                   return (
                     <td
-                      key={`${row.supplier || "new"}-${index}-price`}
+                      key={`${getRowKey(row, index)}-price`}
                       className={`text-sm ${
                         isBest
                           ? "border border-emerald-600 bg-emerald-900/40 text-emerald-100"
@@ -427,7 +440,7 @@ export default function DealDetailPage() {
                   const isFastest = bestLeadTime !== undefined && row.leadTimeDays === bestLeadTime;
                   return (
                     <td
-                      key={`${row.supplier || "new"}-${index}-lead`}
+                      key={`${getRowKey(row, index)}-lead`}
                       className={`text-sm ${
                         isFastest
                           ? "border border-sky-600 bg-sky-900/40 text-sky-100"
@@ -445,7 +458,7 @@ export default function DealDetailPage() {
                   const isBestValue = bestValueIndex !== null && index === bestValueIndex;
                   return (
                     <td
-                      key={`${row.supplier || "new"}-${index}-value`}
+                      key={`${getRowKey(row, index)}-value`}
                       className={`text-sm ${
                         isBestValue
                           ? "border border-amber-600 bg-amber-900/40 text-amber-100"
@@ -460,7 +473,7 @@ export default function DealDetailPage() {
               <tr>
                 <td className="font-medium text-slate-200">MOQ</td>
                 {activeRows.map((row, index) => (
-                  <td key={`${row.supplier || "new"}-${index}-moq`} className="text-sm text-slate-200">
+                  <td key={`${getRowKey(row, index)}-moq`} className="text-sm text-slate-200">
                     {row.moq.toLocaleString()} units
                   </td>
                 ))}

@@ -19,5 +19,5 @@ This project uses different environment variables for the frontend (Vercel) and 
 
 ## Notes
 
-- When `NEXT_PUBLIC_API_URL` is not set, the frontend defaults to `http://localhost:8080` for local development.
+- When `NEXT_PUBLIC_API_URL` is not set, the frontend defaults to `http://127.0.0.1:8000` for local development.
 - HS256 tokens require `SUPABASE_JWT_SECRET`; RS256 tokens are verified via Supabase JWKS at `SUPABASE_URL/auth/v1/keys`.

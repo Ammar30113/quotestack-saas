@@ -111,12 +111,12 @@ app.include_router(quotes.router)
 
 
 def _get_port() -> int:
-    raw_port = os.environ.get("PORT", "8080")
+    raw_port = os.environ.get("PORT", "8000")
     try:
         return int(raw_port)
     except ValueError:
-        print(f"Invalid PORT value '{raw_port}', defaulting to 8080")
-        return 8080
+        print(f"Invalid PORT value '{raw_port}', defaulting to 8000")
+        return 8000
 
 
 @app.middleware("http")

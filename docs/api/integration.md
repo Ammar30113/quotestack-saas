@@ -3,6 +3,9 @@
 ## Introduction  
 QuoteStack SaaS helps traders normalize and compare supplier quotes. A robust API makes it easy for partners and internal teams to integrate with the platform. This document outlines the endpoints, authentication methods, error handling strategy and data contracts for the QuoteStack public API.  
 
+## Status  
+This document is a forward-looking integration plan. The current backend exposes `/deals` and `/quotes` (no `/api/v1` prefix) and relies on Supabase Auth JWTs passed as `Authorization: Bearer <token>`.  
+
 ## Target Endpoints  
 - **POST /api/v1/auth/login** – authenticate a user and return a JSON Web Token (JWT) for subsequent requests. Clients send credentials (email/password) in the body and receive an access token.  
 - **POST /api/v1/auth/refresh** – refresh an expired access token using a valid refresh token.  
