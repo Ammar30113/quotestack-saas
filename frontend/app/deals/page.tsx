@@ -78,7 +78,7 @@ export default function DealsPage() {
         router.replace("/login");
         return;
       }
-      setMessage(fallback);
+      setMessage(err.message || fallback);
       return;
     }
     if (err instanceof Error) {
