@@ -23,10 +23,28 @@ export type ApiQuote = {
   deal_id: number;
   amount: string;
   currency?: string | null;
+  amount_base?: string | null;
+  base_currency?: string | null;
+  fx_rate?: string | null;
+  fx_date?: string | null;
   supplier?: string | null;
   lead_time_days?: number | null;
   moq?: number | null;
   created_at?: string | null;
+};
+
+export type QuoteComparison = {
+  base_currency?: string | null;
+  best_quote_id?: number | null;
+  ranking: Array<{
+    quote_id: number;
+    score: number;
+    price_rank: number;
+    lead_time_rank: number;
+    amount_base: string | null;
+    lead_time_days: number;
+  }>;
+  unscored_quote_ids?: number[];
 };
 
 type RequestOptions = RequestInit & { token?: string };
@@ -58,6 +76,22 @@ export class ApiError extends Error {
     this.url = options?.url;
     this.responseBody = options?.responseBody;
   }
+}
+
+type PaginationOptions = {
+  limit?: number;
+  offset?: number;
+};
+
+function buildQuery(params: Record<string, string | number | undefined>) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined) {
+      query.set(key, String(value));
+    }
+  });
+  const raw = query.toString();
+  return raw ? `?${raw}` : "";
 }
 
 async function request<T>(path: string, options?: RequestOptions): Promise<T> {
@@ -105,8 +139,9 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function getDeals(token: string): Promise<ApiListResponse<ApiDeal>> {
-  return request<ApiListResponse<ApiDeal>>("/deals", { token });
+export async function getDeals(token: string, options?: PaginationOptions): Promise<ApiListResponse<ApiDeal>> {
+  const query = buildQuery({ limit: options?.limit, offset: options?.offset });
+  return request<ApiListResponse<ApiDeal>>(`/deals${query}`, { token });
 }
 
 export async function createDeal(
@@ -125,8 +160,13 @@ export async function getDeal(id: number, token: string): Promise<ApiDeal> {
   return data.deal;
 }
 
-export async function getQuotesForDeal(dealId: number, token: string): Promise<ApiListResponse<ApiQuote>> {
-  return request<ApiListResponse<ApiQuote>>(`/quotes?deal_id=${dealId}`, { token });
+export async function getQuotesForDeal(
+  dealId: number,
+  token: string,
+  options?: PaginationOptions
+): Promise<ApiListResponse<ApiQuote>> {
+  const query = buildQuery({ deal_id: dealId, limit: options?.limit, offset: options?.offset });
+  return request<ApiListResponse<ApiQuote>>(`/quotes${query}`, { token });
 }
 
 type CreateQuotePayload = {
@@ -172,4 +212,12 @@ export async function updateQuote(token: string, quoteId: number, payload: Creat
   });
 
   return data.quote;
+}
+
+export async function compareQuotes(token: string, quoteIds: number[]): Promise<QuoteComparison> {
+  return request<QuoteComparison>("/quotes/compare", {
+    method: "POST",
+    body: JSON.stringify({ quote_ids: quoteIds }),
+    token
+  });
 }

@@ -31,6 +31,24 @@ alter table public.deals
 alter table public.quotes
   add column if not exists user_id uuid references auth.users (id);
 
+alter table public.quotes
+  add column if not exists amount_base numeric,
+  add column if not exists base_currency text,
+  add column if not exists fx_rate numeric,
+  add column if not exists fx_date date;
+
+create table if not exists public.fx_rates (
+  id bigserial primary key,
+  base_currency text not null,
+  quote_currency text not null,
+  rate numeric not null,
+  as_of_date date not null,
+  created_at timestamptz default now()
+);
+
+create unique index if not exists fx_rates_unique
+  on public.fx_rates (base_currency, quote_currency, as_of_date);
+
 -- Optional: backfill currency from existing quotes.
 -- update public.deals d
 -- set currency = q.currency
@@ -64,11 +82,13 @@ alter table public.quotes alter column user_id set not null;
 
 alter table public.deals enable row level security;
 alter table public.quotes enable row level security;
+alter table public.fx_rates enable row level security;
 
 drop policy if exists deals_owner_select on public.deals;
 drop policy if exists deals_owner_modify on public.deals;
 drop policy if exists quotes_owner_select on public.quotes;
 drop policy if exists quotes_owner_modify on public.quotes;
+drop policy if exists fx_rates_read on public.fx_rates;
 
 create policy deals_owner_select on public.deals
   for select using (auth.uid() = user_id);
@@ -94,7 +114,13 @@ create policy quotes_owner_modify on public.quotes
     )
   );
 
+create policy fx_rates_read on public.fx_rates
+  for select using (auth.role() = 'authenticated');
+
 revoke all on public.deals from public;
 revoke all on public.quotes from public;
+revoke all on public.fx_rates from public;
+
+grant select on public.fx_rates to authenticated;
 
 commit;

@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Decimal from "decimal.js";
 
-import { ApiError, createQuote, getDeal, getQuotesForDeal, updateQuote } from "@/lib/api";
+import { ApiError, compareQuotes, createQuote, getDeal, getQuotesForDeal, updateQuote } from "@/lib/api";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import type { QuoteRow } from "@/lib/mockData";
 
@@ -19,8 +19,8 @@ const formatGroupedNumber = (value: string) => {
   return rawFraction ? `${sign}${grouped}.${rawFraction}` : `${sign}${grouped}`;
 };
 
-const parseDecimal = (value: string) => {
-  const trimmed = value.trim();
+const parseDecimal = (value?: string | null) => {
+  const trimmed = value?.trim() ?? "";
   if (!trimmed) return null;
   try {
     return new Decimal(trimmed);
@@ -29,20 +29,26 @@ const parseDecimal = (value: string) => {
   }
 };
 
-const formatAmount = (value: string, currency: string) => {
+const formatAmount = (value: string | null | undefined, currency: string, decimals = 0) => {
   const amount = parseDecimal(value);
   if (!amount) return "-";
-  const rounded = amount.toFixed(0);
+  const rounded = amount.toFixed(decimals);
   return `${currency} ${formatGroupedNumber(rounded)}`;
 };
 
-const blankRow: QuoteRow = {
+const createBlankRow = (currency: string): QuoteRow => ({
   supplier: "",
   price: "",
-  currency: "USD",
+  currency,
+  amountBase: null,
+  baseCurrency: currency,
+  fxRate: null,
+  fxDate: null,
   leadTimeDays: 0,
   moq: 0
-};
+});
+
+const PAGE_SIZE = 20;
 
 export default function DealDetailPage() {
   const params = useParams<Params>();
@@ -52,10 +58,16 @@ export default function DealDetailPage() {
   const [token, setToken] = useState<string | null>(null);
   const [rows, setRows] = useState<QuoteRow[]>([]);
   const [dealName, setDealName] = useState<string>("");
+  const [dealCurrency, setDealCurrency] = useState<string>("USD");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savingRowIndex, setSavingRowIndex] = useState<number | null>(null);
+  const [quoteOffset, setQuoteOffset] = useState(0);
+  const [quoteHasMore, setQuoteHasMore] = useState(false);
+  const [bestQuoteId, setBestQuoteId] = useState<number | null>(null);
+  const [unscoredQuoteIds, setUnscoredQuoteIds] = useState<number[]>([]);
   const isMounted = useRef(true);
 
   const handleApiError = (err: unknown, fallback: string, setMessage: (message: string) => void) => {
@@ -126,26 +138,70 @@ export default function DealDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealId]);
 
+  const refreshComparison = useCallback(
+    async (accessToken: string, quoteIds: number[]) => {
+      if (!quoteIds.length) {
+        if (isMounted.current) {
+          setBestQuoteId(null);
+          setUnscoredQuoteIds([]);
+        }
+        return;
+      }
+      try {
+        const comparison = await compareQuotes(accessToken, quoteIds);
+        if (!isMounted.current) return;
+        setBestQuoteId(comparison.best_quote_id ?? null);
+        setUnscoredQuoteIds(comparison.unscored_quote_ids ?? []);
+      } catch (err) {
+        if (err instanceof ApiError && (err.code === "UNAUTHORIZED" || err.code === "FORBIDDEN")) {
+          supabase?.auth.signOut();
+          router.replace("/login");
+          return;
+        }
+        console.error("[Quotes] Comparison failed", err);
+        if (isMounted.current) {
+          setBestQuoteId(null);
+        }
+      }
+    },
+    [router, supabase]
+  );
+
   const fetchData = useCallback(
     async (accessToken: string) => {
       if (!isMounted.current) return;
       setLoading(true);
       try {
-        const [deal, quotes] = await Promise.all([getDeal(dealId, accessToken), getQuotesForDeal(dealId, accessToken)]);
+        const [deal, quotes] = await Promise.all([
+          getDeal(dealId, accessToken),
+          getQuotesForDeal(dealId, accessToken, { limit: PAGE_SIZE, offset: 0 })
+        ]);
+        const baseCurrency = deal.currency || "USD";
         const mapped = quotes.items.map<QuoteRow>((quote) => ({
           id: quote.id,
           supplier: quote.supplier || `Supplier ${quote.id}`,
           price: quote.amount || "",
-          currency: quote.currency || "USD",
+          currency: quote.currency || baseCurrency,
+          amountBase: quote.amount_base || null,
+          baseCurrency: quote.base_currency || baseCurrency,
+          fxRate: quote.fx_rate || null,
+          fxDate: quote.fx_date || null,
           leadTimeDays: quote.lead_time_days || 0,
           moq: quote.moq || 0
         }));
         if (isMounted.current) {
           setDealName(deal.company_name);
-          setRows([...mapped, blankRow]);
+          setDealCurrency(baseCurrency);
+          setRows([...mapped, createBlankRow(baseCurrency)]);
+          setQuoteOffset(mapped.length);
+          setQuoteHasMore(quotes.has_more);
           setLoadError(null);
           setSaveError(null);
         }
+        await refreshComparison(
+          accessToken,
+          mapped.map((row) => row.id!).filter((id) => typeof id === "number")
+        );
       } catch (err) {
         if (isMounted.current) {
           handleApiError(err, "Failed to load deal", setLoadError);
@@ -156,10 +212,49 @@ export default function DealDetailPage() {
         }
       }
     },
-    [dealId]
+    [dealId, refreshComparison]
   );
 
   const getRowKey = (row: QuoteRow, index: number) => (row.id ? `quote-${row.id}` : `draft-${index}`);
+
+  const loadMoreQuotes = async () => {
+    if (!token || loadingMore || !quoteHasMore) return;
+    setLoadingMore(true);
+    try {
+      const quotes = await getQuotesForDeal(dealId, token, { limit: PAGE_SIZE, offset: quoteOffset });
+      const mapped = quotes.items.map<QuoteRow>((quote) => ({
+        id: quote.id,
+        supplier: quote.supplier || `Supplier ${quote.id}`,
+        price: quote.amount || "",
+        currency: quote.currency || dealCurrency,
+        amountBase: quote.amount_base || null,
+        baseCurrency: quote.base_currency || dealCurrency,
+        fxRate: quote.fx_rate || null,
+        fxDate: quote.fx_date || null,
+        leadTimeDays: quote.lead_time_days || 0,
+        moq: quote.moq || 0
+      }));
+
+      const draftRow = rows.find((row) => !row.id) ?? createBlankRow(dealCurrency);
+      const savedRows = rows.filter((row) => row.id);
+      const existingIds = new Set(savedRows.map((row) => row.id));
+      const newRows = mapped.filter((row) => row.id && !existingIds.has(row.id));
+      const mergedRows = [...savedRows, ...newRows];
+
+      setRows([...mergedRows, draftRow]);
+      setQuoteOffset(quoteOffset + mapped.length);
+      setQuoteHasMore(quotes.has_more);
+      setSaveError(null);
+      await refreshComparison(
+        token,
+        mergedRows.map((row) => row.id!).filter((id) => typeof id === "number")
+      );
+    } catch (err) {
+      handleApiError(err, "Failed to load more quotes", setSaveError);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const submitRow = async (index: number) => {
     const row = rows[index];
@@ -192,16 +287,33 @@ export default function DealDetailPage() {
         id: quote.id,
         supplier: quote.supplier || `Supplier ${quote.id}`,
         price: quote.amount || "",
-        currency: quote.currency || "USD",
+        currency: quote.currency || dealCurrency,
+        amountBase: quote.amount_base || null,
+        baseCurrency: quote.base_currency || dealCurrency,
+        fxRate: quote.fx_rate || null,
+        fxDate: quote.fx_date || null,
         leadTimeDays: quote.lead_time_days || 0,
         moq: quote.moq || 0
       };
 
-      setRows((current) => current.map((item, idx) => (idx === index ? updatedRow : item)));
-      setSaveError(null);
-
-      if (!isExisting) {
-        await fetchData(token);
+      if (isExisting) {
+        const nextRows = rows.map((item, idx) => (idx === index ? updatedRow : item));
+        setRows(nextRows);
+        setSaveError(null);
+        await refreshComparison(
+          token,
+          nextRows.map((row) => row.id!).filter((id) => typeof id === "number")
+        );
+      } else {
+        const savedRows = rows.filter((row) => row.id);
+        const nextRows = [updatedRow, ...savedRows, createBlankRow(dealCurrency)];
+        setRows(nextRows);
+        setSaveError(null);
+        setQuoteOffset((current) => current + 1);
+        await refreshComparison(
+          token,
+          nextRows.map((row) => row.id!).filter((id) => typeof id === "number")
+        );
       }
     } catch (err) {
       handleApiError(err, "Failed to save quote", setSaveError);
@@ -215,7 +327,10 @@ export default function DealDetailPage() {
       current.map((row, idx) => {
         if (idx !== index) return row;
         if (key === "price") {
-          return { ...row, [key]: value };
+          return { ...row, [key]: value, amountBase: null, fxRate: null, fxDate: null };
+        }
+        if (key === "currency") {
+          return { ...row, [key]: value, amountBase: null, fxRate: null, fxDate: null };
         }
         if (key === "leadTimeDays" || key === "moq") {
           return { ...row, [key]: Number(value) || 0 };
@@ -225,6 +340,12 @@ export default function DealDetailPage() {
     );
   };
 
+  const getNormalizedAmount = (row: QuoteRow) => {
+    if (row.currency === dealCurrency) return row.price || row.amountBase;
+    if (row.amountBase) return row.amountBase;
+    return null;
+  };
+
   const activeRows = useMemo(
     () => rows.filter((row) => row.supplier || row.price || row.id),
     [rows]
@@ -232,11 +353,11 @@ export default function DealDetailPage() {
 
   const bestPrice = useMemo(() => {
     const prices = activeRows
-      .map((row) => parseDecimal(row.price))
+      .map((row) => parseDecimal(getNormalizedAmount(row)))
       .filter((value): value is Decimal => value !== null && value.greaterThan(0));
     if (!prices.length) return null;
     return prices.reduce((min, value) => (value.lessThan(min) ? value : min));
-  }, [activeRows]);
+  }, [activeRows, dealCurrency]);
   const bestLeadTime = useMemo(() => {
     const leadTimes = activeRows.map((row) => row.leadTimeDays).filter((value) => value > 0);
     return leadTimes.length ? Math.min(...leadTimes) : undefined;
@@ -245,7 +366,7 @@ export default function DealDetailPage() {
   const bestValueIndex = useMemo(() => {
     const candidates = activeRows
       .map((row, index) => {
-        const amount = parseDecimal(row.price);
+        const amount = parseDecimal(getNormalizedAmount(row));
         if (!amount || amount.lte(0) || row.leadTimeDays <= 0) return null;
         return { index, amount, leadTimeDays: row.leadTimeDays };
       })
@@ -271,7 +392,7 @@ export default function DealDetailPage() {
     }
 
     return bestIndex;
-  }, [activeRows]);
+  }, [activeRows, dealCurrency]);
 
   if (!Number.isFinite(dealId)) {
     return (
@@ -395,6 +516,18 @@ export default function DealDetailPage() {
             </div>
           )}
         </div>
+        {quoteHasMore && (
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={loadMoreQuotes}
+              disabled={loadingMore}
+              className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-brand-400 hover:text-brand-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loadingMore ? "Loading more..." : "Load more quotes"}
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="space-y-3">
@@ -416,20 +549,37 @@ export default function DealDetailPage() {
             </thead>
             <tbody>
               <tr>
-                <td className="font-medium text-slate-200">Price</td>
+                <td className="font-medium text-slate-200">Quoted price</td>
                 {activeRows.map((row, index) => {
-                  const amount = parseDecimal(row.price);
-                  const isBest = Boolean(bestPrice && amount && amount.equals(bestPrice));
                   return (
                     <td
                       key={`${getRowKey(row, index)}-price`}
+                      className="text-sm text-slate-200"
+                    >
+                      {formatAmount(row.price, row.currency || dealCurrency)}
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr>
+                <td className="font-medium text-slate-200">{`Normalized (${dealCurrency})`}</td>
+                {activeRows.map((row, index) => {
+                  const normalized = getNormalizedAmount(row);
+                  const amount = parseDecimal(normalized);
+                  const isBest = Boolean(bestPrice && amount && amount.equals(bestPrice));
+                  const isMissing = !normalized;
+                  return (
+                    <td
+                      key={`${getRowKey(row, index)}-normalized`}
                       className={`text-sm ${
                         isBest
                           ? "border border-emerald-600 bg-emerald-900/40 text-emerald-100"
-                          : "text-slate-200"
+                          : isMissing
+                            ? "text-amber-200"
+                            : "text-slate-200"
                       }`}
                     >
-                      {formatAmount(row.price, row.currency || "USD")}
+                      {isMissing ? "FX missing" : formatAmount(normalized, dealCurrency, 2)}
                     </td>
                   );
                 })}
@@ -455,17 +605,21 @@ export default function DealDetailPage() {
               <tr>
                 <td className="font-medium text-slate-200">Best value</td>
                 {activeRows.map((row, index) => {
-                  const isBestValue = bestValueIndex !== null && index === bestValueIndex;
+                  const isBestValue =
+                    bestQuoteId !== null ? row.id === bestQuoteId : bestValueIndex !== null && index === bestValueIndex;
+                  const isUnscored = row.id ? unscoredQuoteIds.includes(row.id) : false;
                   return (
                     <td
                       key={`${getRowKey(row, index)}-value`}
                       className={`text-sm ${
                         isBestValue
                           ? "border border-amber-600 bg-amber-900/40 text-amber-100"
-                          : "text-slate-400"
+                          : isUnscored
+                            ? "text-amber-200"
+                            : "text-slate-400"
                       }`}
                     >
-                      {isBestValue ? "Best value" : "—"}
+                      {isBestValue ? "Best value" : isUnscored ? "Needs FX" : "—"}
                     </td>
                   );
                 })}

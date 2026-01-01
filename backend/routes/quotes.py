@@ -4,7 +4,8 @@ from decimal import Decimal, InvalidOperation
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.core.auth import UserContext, get_current_user
-from backend.models.schemas import PaginationParams, QuoteCreate, QuoteUpdate
+from backend.models.schemas import PaginationParams, QuoteCompareRequest, QuoteCreate, QuoteUpdate
+from backend.services.fx_rates import get_fx_rate_for_date
 from backend.services.supabase_client import get_supabase_client_for_user
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
@@ -21,12 +22,38 @@ def _format_amount(value: object) -> str | None:
         return str(value)
 
 
+def _parse_decimal(value: object) -> Decimal | None:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _normalize_quote_amount(amount: Decimal, quote_currency: str, base_currency: str, user: UserContext) -> dict:
+    rate, fx_date = get_fx_rate_for_date(user, base_currency, quote_currency)
+    amount_base = amount * rate
+    return {
+        "amount_base": _format_amount(amount_base),
+        "base_currency": base_currency,
+        "fx_rate": _format_amount(rate),
+        "fx_date": fx_date.isoformat(),
+    }
+
+
 def _map_quote(row: dict) -> dict:
     return {
         "id": row.get("id"),
         "deal_id": row.get("deal_id"),
         "amount": _format_amount(row.get("price")),
         "currency": row.get("currency"),
+        "amount_base": _format_amount(row.get("amount_base")),
+        "base_currency": row.get("base_currency"),
+        "fx_rate": _format_amount(row.get("fx_rate")),
+        "fx_date": row.get("fx_date"),
         "supplier": row.get("supplier"),
         "lead_time_days": row.get("lead_time_days"),
         "moq": row.get("moq"),
@@ -38,22 +65,23 @@ def _get_client(user: UserContext):
     return get_supabase_client_for_user(user.token)
 
 
-def _ensure_deal_exists(deal_id: int, user: UserContext) -> None:
+def _require_deal(deal_id: int, user: UserContext) -> dict:
     supabase = _get_client(user)
     rows = supabase.select(
         "deals",
-        select="id",
+        select="id,currency",
         filters={"id": f"eq.{deal_id}", "user_id": f"eq.{user.user_id}"},
     )
     if not rows:
         raise HTTPException(status_code=404, detail="Deal not found")
+    return rows[0]
 
 
 def _require_quote(quote_id: int, user: UserContext) -> dict:
     supabase = _get_client(user)
     rows = supabase.select(
         "quotes",
-        select="id,deal_id,price,currency,supplier,lead_time_days,moq,created_at,user_id",
+        select="id,deal_id,price,currency,amount_base,base_currency,fx_rate,fx_date,supplier,lead_time_days,moq,created_at,user_id",
         filters={"id": f"eq.{quote_id}", "user_id": f"eq.{user.user_id}"},
     )
     if not rows:
@@ -98,10 +126,11 @@ def list_quotes(
         filters["deal_id"] = f"eq.{deal_id}"
     rows, total = supabase.select_with_count(
         "quotes",
-        select="id,deal_id,price,currency,supplier,lead_time_days,moq,created_at",
+        select="id,deal_id,price,currency,amount_base,base_currency,fx_rate,fx_date,supplier,lead_time_days,moq,created_at",
         filters=filters,
         limit=pagination.limit,
         offset=pagination.offset,
+        order="created_at.desc",
     )
     quotes = [_map_quote(row) for row in rows]
     total_count = total if total is not None else len(quotes)
@@ -115,6 +144,99 @@ def list_quotes(
     }
 
 
+@router.post("/compare")
+def compare_quotes(payload: QuoteCompareRequest, user: UserContext = Depends(get_current_user)):
+    """Compare quotes using normalized pricing and lead time."""
+    if any(quote_id < 1 for quote_id in payload.quote_ids):
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_QUOTE_ID", "message": "Quote IDs must be positive integers"},
+        )
+
+    unique_ids = list(dict.fromkeys(payload.quote_ids))
+    supabase = _get_client(user)
+    rows = supabase.select(
+        "quotes",
+        select="id,deal_id,amount_base,base_currency,lead_time_days",
+        filters={"id": f"in.({','.join(map(str, unique_ids))})", "user_id": f"eq.{user.user_id}"},
+    )
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Quotes not found")
+
+    found_ids = {row.get("id") for row in rows if row.get("id") is not None}
+    missing_ids = [quote_id for quote_id in unique_ids if quote_id not in found_ids]
+    if missing_ids:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "QUOTE_NOT_FOUND", "message": f"Quotes not found: {missing_ids}"},
+        )
+
+    deal_ids = {row.get("deal_id") for row in rows}
+    if len(deal_ids) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "MISMATCHED_DEALS", "message": "Quotes must belong to the same deal"},
+        )
+
+    base_currencies = {row.get("base_currency") for row in rows if row.get("base_currency")}
+    if len(base_currencies) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "MISMATCHED_CURRENCY", "message": "Quotes must share the same base currency"},
+        )
+    base_currency = next(iter(base_currencies), None)
+
+    candidates = []
+    unscored = []
+    for row in rows:
+        amount_base = _parse_decimal(row.get("amount_base"))
+        lead_time = row.get("lead_time_days") or 0
+        if amount_base is None or amount_base <= 0 or lead_time <= 0:
+            if row.get("id") is not None:
+                unscored.append(row["id"])
+            continue
+        candidates.append({"id": row["id"], "amount_base": amount_base, "lead_time_days": lead_time})
+
+    if not candidates:
+        return {
+            "base_currency": base_currency,
+            "best_quote_id": None,
+            "ranking": [],
+            "unscored_quote_ids": unscored,
+        }
+
+    by_price = sorted(candidates, key=lambda row: row["amount_base"])
+    by_lead = sorted(candidates, key=lambda row: row["lead_time_days"])
+
+    price_rank = {row["id"]: rank for rank, row in enumerate(by_price)}
+    lead_rank = {row["id"]: rank for rank, row in enumerate(by_lead)}
+
+    ranking = []
+    for row in candidates:
+        score = (price_rank.get(row["id"]) or 0) + (lead_rank.get(row["id"]) or 0)
+        ranking.append(
+            {
+                "quote_id": row["id"],
+                "score": score,
+                "price_rank": price_rank.get(row["id"], 0),
+                "lead_time_rank": lead_rank.get(row["id"], 0),
+                "amount_base": _format_amount(row["amount_base"]),
+                "lead_time_days": row["lead_time_days"],
+            }
+        )
+
+    ranking.sort(key=lambda row: (row["score"], row["price_rank"], row["lead_time_rank"]))
+    best_quote_id = ranking[0]["quote_id"] if ranking else None
+
+    return {
+        "base_currency": base_currency,
+        "best_quote_id": best_quote_id,
+        "ranking": ranking,
+        "unscored_quote_ids": unscored,
+    }
+
+
 @router.get("/{quote_id}")
 def retrieve_quote(quote_id: int, user: UserContext = Depends(get_current_user)):
     """Retrieve a single quote by its identifier."""
@@ -125,9 +247,19 @@ def retrieve_quote(quote_id: int, user: UserContext = Depends(get_current_user))
 @router.post("/", status_code=201)
 def create_quote(payload: QuoteCreate, user: UserContext = Depends(get_current_user)):
     """Create a new quote from the provided payload."""
-    _ensure_deal_exists(payload.deal_id, user)
+    deal = _require_deal(payload.deal_id, user)
+    deal_currency = deal.get("currency")
+    if not deal_currency:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "INVALID_DEAL", "message": "Deal currency is required for FX normalization"},
+        )
     supabase = _get_client(user)
     insert_data = _quote_payload_to_db(payload, user)
+    if not insert_data.get("currency"):
+        insert_data["currency"] = deal_currency
+    quote_currency = insert_data.get("currency") or deal_currency
+    insert_data.update(_normalize_quote_amount(payload.amount, quote_currency, deal_currency, user))
     rows = supabase.insert(
         "quotes",
         insert_data,
@@ -151,8 +283,38 @@ def update_quote(quote_id: int, payload: QuoteUpdate, user: UserContext = Depend
 
     update_data = _quote_payload_to_db(payload, user)
 
+    deal_currency = None
     if "deal_id" in update_data:
-        _ensure_deal_exists(update_data["deal_id"], user)
+        deal = _require_deal(update_data["deal_id"], user)
+        deal_currency = deal.get("currency")
+
+    should_recompute = any(field in raw_data for field in ("amount", "currency", "deal_id"))
+    if should_recompute:
+        if deal_currency is None:
+            deal = _require_deal(existing.get("deal_id"), user)
+            deal_currency = deal.get("currency")
+        if not deal_currency:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "INVALID_DEAL", "message": "Deal currency is required for FX normalization"},
+            )
+
+        amount_value = payload.amount if "amount" in raw_data else _parse_decimal(existing.get("price"))
+        if amount_value is None:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "INVALID_QUOTE", "message": "Quote amount is required for FX normalization"},
+            )
+
+        quote_currency = update_data.get("currency") or existing.get("currency") or deal_currency
+        if not quote_currency:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "INVALID_QUOTE", "message": "Quote currency is required for FX normalization"},
+            )
+        if "currency" not in update_data and existing.get("currency") is None:
+            update_data["currency"] = quote_currency
+        update_data.update(_normalize_quote_amount(amount_value, quote_currency, deal_currency, user))
 
     supabase = _get_client(user)
     rows = supabase.update(

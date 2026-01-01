@@ -54,6 +54,7 @@ def list_deals(
         filters={"user_id": f"eq.{user.user_id}"},
         limit=pagination.limit,
         offset=pagination.offset,
+        order="created_at.desc",
     )
     deals = [_map_deal(row) for row in rows]
     total_count = total if total is not None else len(deals)

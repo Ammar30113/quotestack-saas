@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from backend.models.schemas import QuoteCreate, QuoteUpdate
+from backend.models.schemas import QuoteCompareRequest, QuoteCreate, QuoteUpdate
 
 
 def test_quote_create_rejects_invalid_amount():
@@ -27,3 +27,8 @@ def test_quote_update_validates_when_fields_provided():
         QuoteUpdate(amount=Decimal("-1"))
     with pytest.raises(ValidationError):
         QuoteUpdate(deal_id=0)
+
+
+def test_quote_compare_requires_ids():
+    with pytest.raises(ValidationError):
+        QuoteCompareRequest(quote_ids=[])

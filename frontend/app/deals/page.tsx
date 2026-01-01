@@ -46,18 +46,24 @@ const CURRENCY_OPTIONS = [
   "VND"
 ];
 
+const PAGE_SIZE = 20;
+
 export default function DealsPage() {
   const router = useRouter();
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [rows, setRows] = useState<ApiDeal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({ company_name: "", currency: "USD", description: "" });
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const isMounted = useRef(true);
 
   const handleApiError = (err: unknown, fallback: string, setMessage: (message: string) => void) => {
@@ -109,7 +115,7 @@ export default function DealsPage() {
         return;
       }
       setToken(session.access_token);
-      await loadDeals(session.access_token);
+      await loadDeals(session.access_token, 0, false);
     };
 
     ensureSession();
@@ -124,7 +130,7 @@ export default function DealsPage() {
         }
         if (!isMounted.current) return;
         setToken(session.access_token);
-        loadDeals(session.access_token);
+        loadDeals(session.access_token, 0, false);
       });
       unsubscribe = () => authListener?.subscription.unsubscribe();
     }
@@ -136,22 +142,45 @@ export default function DealsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadDeals = async (accessToken: string) => {
+  const loadDeals = async (accessToken: string, offsetValue = 0, append = false) => {
     if (!isMounted.current) return;
-    setLoading(true);
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
     try {
-      const deals = await getDeals(accessToken);
+      const deals = await getDeals(accessToken, { limit: PAGE_SIZE, offset: offsetValue });
       if (isMounted.current) {
-        setRows(deals.items);
-        setError(null);
+        setRows((current) => (append ? [...current, ...deals.items] : deals.items));
+        setOffset(offsetValue + deals.items.length);
+        setHasMore(deals.has_more);
+        if (append) {
+          setLoadMoreError(null);
+        } else {
+          setError(null);
+          setLoadMoreError(null);
+        }
       }
     } catch (err) {
       if (isMounted.current) {
-        handleApiError(err, "We couldn’t load your deals right now. This is on our side. Please try again.", setError);
+        if (append) {
+          handleApiError(
+            err,
+            "We couldn’t load more deals right now. This is on our side. Please try again.",
+            setLoadMoreError
+          );
+        } else {
+          handleApiError(err, "We couldn’t load your deals right now. This is on our side. Please try again.", setError);
+        }
       }
     } finally {
       if (isMounted.current) {
-        setLoading(false);
+        if (append) {
+          setLoadingMore(false);
+        } else {
+          setLoading(false);
+        }
       }
     }
   };
@@ -164,6 +193,7 @@ export default function DealsPage() {
     try {
       const newDeal = await createDeal(token, form);
       setRows((current) => [newDeal, ...current]);
+      setOffset((current) => current + 1);
       setForm({ company_name: "", currency: "USD", description: "" });
       setSuccessMessage("Deal created. You can edit these details anytime.");
       setFormError(null);
@@ -188,7 +218,13 @@ export default function DealsPage() {
 
   const refreshDeals = () => {
     if (!token) return;
-    loadDeals(token);
+    setOffset(0);
+    loadDeals(token, 0, false);
+  };
+
+  const loadMoreDeals = () => {
+    if (!token || loadingMore || !hasMore) return;
+    loadDeals(token, offset, true);
   };
 
   useEffect(() => {
@@ -303,6 +339,23 @@ export default function DealsPage() {
           </tbody>
         </table>
       </div>
+      {loadMoreError && (
+        <div className="rounded-lg border border-rose-700/40 bg-rose-900/30 px-4 py-3 text-sm text-rose-100">
+          {loadMoreError}
+        </div>
+      )}
+      {hasMore && !loading && !error && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={loadMoreDeals}
+            disabled={!token || loadingMore}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-brand-400 hover:text-brand-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loadingMore ? "Loading more..." : "Load more"}
+          </button>
+        </div>
+      )}
 
       {isCreateOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">

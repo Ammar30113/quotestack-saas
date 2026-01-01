@@ -131,6 +131,7 @@ class SupabaseRestClient:
         filters: Optional[Mapping[str, str]] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
+        order: Optional[str] = None,
     ):
         params = {"select": select}
         if filters:
@@ -139,6 +140,8 @@ class SupabaseRestClient:
             params["limit"] = str(limit)
         if offset is not None:
             params["offset"] = str(offset)
+        if order:
+            params["order"] = order
         return self._request("GET", table, params=params)
 
     def select_with_count(
@@ -149,6 +152,7 @@ class SupabaseRestClient:
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         count: str = "exact",
+        order: Optional[str] = None,
     ):
         params = {"select": select}
         if filters:
@@ -157,6 +161,8 @@ class SupabaseRestClient:
             params["limit"] = str(limit)
         if offset is not None:
             params["offset"] = str(offset)
+        if order:
+            params["order"] = order
         return self._request("GET", table, params=params, count=count)
 
     def insert(self, table: str, payload: Any):

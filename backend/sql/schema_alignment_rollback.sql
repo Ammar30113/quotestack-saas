@@ -10,6 +10,7 @@ drop policy if exists deals_owner_select on public.deals;
 drop policy if exists deals_owner_modify on public.deals;
 drop policy if exists quotes_owner_select on public.quotes;
 drop policy if exists quotes_owner_modify on public.quotes;
+drop policy if exists fx_rates_read on public.fx_rates;
 
 alter table public.deals alter column user_id drop default;
 alter table public.quotes alter column user_id drop default;
@@ -19,6 +20,12 @@ alter table public.quotes alter column user_id drop not null;
 
 alter table public.deals drop column if exists user_id;
 alter table public.quotes drop column if exists user_id;
+alter table public.quotes drop column if exists amount_base;
+alter table public.quotes drop column if exists base_currency;
+alter table public.quotes drop column if exists fx_rate;
+alter table public.quotes drop column if exists fx_date;
+
+drop table if exists public.fx_rates;
 
 alter table public.deals drop column if exists currency;
 alter table public.deals drop column if exists description;

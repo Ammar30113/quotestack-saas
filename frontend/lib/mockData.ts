@@ -3,6 +3,10 @@ export type QuoteRow = {
   supplier: string;
   price: string;
   currency: string;
+  amountBase?: string | null;
+  baseCurrency?: string | null;
+  fxRate?: string | null;
+  fxDate?: string | null;
   leadTimeDays: number;
   moq: number;
 };

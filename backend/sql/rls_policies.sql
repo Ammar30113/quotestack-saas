@@ -29,6 +29,7 @@ alter table public.quotes alter column user_id set default auth.uid();
 -- 3) Enable RLS.
 alter table public.deals enable row level security;
 alter table public.quotes enable row level security;
+alter table public.fx_rates enable row level security;
 
 -- 4) Policies: owners only (auth.uid()).
 create policy deals_owner_select on public.deals
@@ -55,6 +56,12 @@ create policy quotes_owner_modify on public.quotes
         )
     );
 
+create policy fx_rates_read on public.fx_rates
+    for select using (auth.role() = 'authenticated');
+
 -- 5) (Optional) tighten default privileges.
 revoke all on public.deals from public;
 revoke all on public.quotes from public;
+revoke all on public.fx_rates from public;
+
+grant select on public.fx_rates to authenticated;

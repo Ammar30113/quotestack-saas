@@ -52,6 +52,14 @@ class QuoteUpdate(BaseModel):
     moq: Optional[int] = Field(None, ge=0)
 
 
+class QuoteCompareRequest(BaseModel):
+    """Schema for comparing quotes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    quote_ids: list[int] = Field(..., min_length=1)
+
+
 class PaginationParams(BaseModel):
     """Shared pagination schema to keep limits consistent across endpoints."""
 
