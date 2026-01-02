@@ -141,14 +141,14 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
 
 export async function getDeals(token: string, options?: PaginationOptions): Promise<ApiListResponse<ApiDeal>> {
   const query = buildQuery({ limit: options?.limit, offset: options?.offset });
-  return request<ApiListResponse<ApiDeal>>(`/deals${query}`, { token });
+  return request<ApiListResponse<ApiDeal>>(`/deals/${query}`, { token });
 }
 
 export async function createDeal(
   token: string,
   payload: { company_name: string; currency: string; description?: string | null }
 ): Promise<ApiDeal> {
-  return request<ApiDeal>("/deals", {
+  return request<ApiDeal>("/deals/", {
     method: "POST",
     body: JSON.stringify(payload),
     token
@@ -166,7 +166,7 @@ export async function getQuotesForDeal(
   options?: PaginationOptions
 ): Promise<ApiListResponse<ApiQuote>> {
   const query = buildQuery({ deal_id: dealId, limit: options?.limit, offset: options?.offset });
-  return request<ApiListResponse<ApiQuote>>(`/quotes${query}`, { token });
+  return request<ApiListResponse<ApiQuote>>(`/quotes/${query}`, { token });
 }
 
 type CreateQuotePayload = {
@@ -187,7 +187,7 @@ export async function createQuote(token: string, dealId: number, payload: Create
     moq: payload.moq
   };
 
-  const data = await request<{ quote: ApiQuote; message?: string }>("/quotes", {
+  const data = await request<{ quote: ApiQuote; message?: string }>("/quotes/", {
     method: "POST",
     body: JSON.stringify(body),
     token
