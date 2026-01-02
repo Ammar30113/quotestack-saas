@@ -9,9 +9,6 @@ const shouldEnableSentry =
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: ["@supabase/supabase-js"],
-  sentry: {
-    hideSourceMaps: true
-  },
   webpack: (config) => {
     config.resolve.alias["@supabase/supabase-js"] = path.resolve(
       __dirname,
@@ -25,6 +22,10 @@ const sentryWebpackPluginOptions = {
   silent: true,
 };
 
+const sentryBuildOptions = {
+  hideSourceMaps: true,
+};
+
 module.exports = shouldEnableSentry
-  ? withSentryConfig(nextConfig, sentryWebpackPluginOptions)
+  ? withSentryConfig(nextConfig, sentryWebpackPluginOptions, sentryBuildOptions)
   : nextConfig;
